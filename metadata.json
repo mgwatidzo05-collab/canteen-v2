@@ -1,0 +1,5 @@
+{
+  "name": "CanteenConnect",
+  "description": "A real-time canteen ordering and management platform with portals for customers, owners, and super admins.",
+  "requestFramePermissions": []
+}

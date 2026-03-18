@@ -1,0 +1,84 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information and role.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["admin", "owner", "customer"] },
+        "canteenId": { "type": "string", "description": "Associated canteen ID for owners." }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Canteen": {
+      "title": "Canteen",
+      "description": "Canteen details and settings.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "ownerCode": { "type": "string", "description": "Unique subscription code." },
+        "status": { "type": "string", "enum": ["active", "frozen"] },
+        "ecoCashNumber": { "type": "string" },
+        "ecoCashRate": { "type": "number" },
+        "address": { "type": "string" },
+        "notice": { "type": "string" },
+        "isAcceptingOrders": { "type": "boolean" },
+        "rating": { "type": "number" },
+        "reviewCount": { "type": "integer" }
+      },
+      "required": ["name", "ownerCode", "status"]
+    },
+    "MenuItem": {
+      "title": "MenuItem",
+      "description": "Food items offered by a canteen.",
+      "type": "object",
+      "properties": {
+        "canteenId": { "type": "string" },
+        "name": { "type": "string" },
+        "price": { "type": "number" },
+        "description": { "type": "string" },
+        "imageUrl": { "type": "string" }
+      },
+      "required": ["canteenId", "name", "price"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer food orders.",
+      "type": "object",
+      "properties": {
+        "customerId": { "type": "string" },
+        "canteenId": { "type": "string" },
+        "items": { "type": "array", "items": { "type": "object" } },
+        "total": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "preparing", "ready", "collected", "cancelled"] },
+        "paymentProof": { "type": "string" },
+        "paymentType": { "type": "string", "enum": ["code", "screenshot"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["customerId", "canteenId", "items", "total", "status"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "Customer reviews for canteens.",
+      "type": "object",
+      "properties": {
+        "customerId": { "type": "string" },
+        "canteenId": { "type": "string" },
+        "rating": { "type": "number" },
+        "comment": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["customerId", "canteenId", "rating"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": { "schema": "User", "description": "User profiles." },
+    "/canteens/{canteenId}": { "schema": "Canteen", "description": "Canteen information." },
+    "/canteens/{canteenId}/menuItems/{itemId}": { "schema": "MenuItem", "description": "Menu items for a canteen." },
+    "/orders/{orderId}": { "schema": "Order", "description": "Food orders." },
+    "/reviews/{reviewId}": { "schema": "Review", "description": "Canteen reviews." }
+  }
+}

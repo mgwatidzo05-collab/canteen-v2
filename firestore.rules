@@ -1,0 +1,149 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {uid}
+    // Fields:
+    //   - uid: string (required) - User's unique ID
+    //   - email: string (required, email format) - User's email
+    //   - role: string (required, enum: admin, owner, customer) - User's role
+    //   - canteenId: string (optional) - Associated canteen ID for owners
+    //
+    // Collection: canteens
+    // Document ID: {canteenId}
+    // Fields:
+    //   - name: string (required, max 100) - Canteen name
+    //   - ownerId: string (optional) - UID of the owner
+    //   - ownerCode: string (required, max 20) - Unique claim code
+    //   - status: string (required, enum: active, frozen) - Canteen status
+    //   - ecoCashNumber: string (optional) - EcoCash payment number
+    //   - ecoCashRate: number (optional) - Conversion rate
+    //   - address: string (optional, max 200) - Physical location
+    //   - notice: string (optional, max 500) - Public notice
+    //   - isAcceptingOrders: bool (optional) - Toggle for orders
+    //   - rating: number (optional) - Average rating
+    //   - reviewCount: int (optional) - Total reviews
+    //
+    // Collection: canteens/{canteenId}/menuItems
+    // Fields: canteenId, name, price, description, imageUrl
+    //
+    // Collection: orders
+    // Fields: customerId, canteenId, items, total, status, paymentProof, paymentType, createdAt
+    //
+    // Collection: reviews
+    // Fields: customerId, canteenId, rating, comment, createdAt
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+          (request.auth.token.email == "mgwatidzo05@gmail.com" && request.auth.token.email_verified == true)
+        );
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasRole(role) {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == role;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // Domain Validators
+    function isValidUser(data) {
+      return data.uid is string && data.uid.size() > 0 &&
+             data.email is string && isValidEmail(data.email) &&
+             data.role in ['admin', 'owner', 'customer'] &&
+             (!('canteenId' in data) || data.canteenId is string);
+    }
+
+    function isValidCanteen(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.ownerCode is string && data.ownerCode.size() > 0 && data.ownerCode.size() <= 20 &&
+             data.status in ['active', 'frozen'] &&
+             (!('ownerId' in data) || data.ownerId is string) &&
+             (!('ecoCashNumber' in data) || data.ecoCashNumber is string) &&
+             (!('address' in data) || data.address is string && data.address.size() <= 200);
+    }
+
+    function isValidOrder(data) {
+      return data.customerId is string && data.canteenId is string &&
+             data.items is list && data.items.size() > 0 &&
+             data.total is number && data.total >= 0 &&
+             data.status in ['pending', 'preparing', 'ready', 'collected', 'cancelled'] &&
+             data.paymentType in ['code', 'screenshot'];
+    }
+
+    // Rules
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == 'customer';
+      allow update: if isAdmin() || 
+        (isOwner(userId) && isValidUser(request.resource.data) && 
+         request.resource.data.role == resource.data.role &&
+         (!('canteenId' in resource.data) || request.resource.data.canteenId == resource.data.canteenId));
+    }
+
+    match /canteens/{canteenId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isValidCanteen(request.resource.data);
+      allow update: if isAdmin() || 
+        (hasRole('owner') && getUserData().canteenId == canteenId && isValidCanteen(request.resource.data)) ||
+        (isAuthenticated() && (!('ownerId' in resource.data) || resource.data.ownerId == '') && 
+         request.resource.data.ownerId == request.auth.uid &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ownerId']));
+      allow delete: if isAdmin();
+      
+      match /menuItems/{itemId} {
+        allow read: if isAuthenticated();
+        allow write: if isAdmin() || (hasRole('owner') && getUserData().canteenId == canteenId);
+      }
+    }
+
+    match /orders/{orderId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == resource.data.customerId || 
+        (hasRole('owner') && getUserData().canteenId == resource.data.canteenId) ||
+        isAdmin()
+      );
+      allow create: if isAuthenticated() && request.resource.data.customerId == request.auth.uid && isValidOrder(request.resource.data);
+      allow update: if isAuthenticated() && (
+        (request.auth.uid == resource.data.customerId && request.resource.data.status == resource.data.status && isValidOrder(request.resource.data)) ||
+        (hasRole('owner') && getUserData().canteenId == resource.data.canteenId && isValidOrder(request.resource.data)) ||
+        isAdmin()
+      );
+    }
+
+    match /reviews/{reviewId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.customerId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && resource.data.customerId == request.auth.uid;
+    }
+  }
+}
