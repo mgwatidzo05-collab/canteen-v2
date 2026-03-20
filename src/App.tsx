@@ -1604,7 +1604,7 @@ const SupabaseStatus = () => {
             {error}
           </p>
           <p className="text-xs text-zinc-500">
-            Make sure you have added <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> to your environment variables in AI Studio or Render.
+            Make sure you have added <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> to your environment variables.
           </p>
         </div>
       ) : (
