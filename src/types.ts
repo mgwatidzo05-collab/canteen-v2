@@ -5,6 +5,8 @@ export interface UserProfile {
   username: string;
   role: UserRole;
   canteenId?: string;
+  phone?: string;
+  lastSeen?: string;
 }
 
 export interface Canteen {

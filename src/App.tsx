@@ -4,7 +4,8 @@ import { User } from '@supabase/supabase-js';
 import { getSupabase, isSupabaseConfigured } from './supabase';
 import { UserProfile, UserRole, Canteen, MenuItem, Order, CartItem, OrderStatus } from './types';
 import { cn } from './lib/utils';
-import { Loader2, LogOut, LayoutDashboard, Store, ShoppingBag, User as UserIcon, Menu, ArrowLeft, Copy, ExternalLink, Trash2, Plus, X, Star, Mail, Lock, AlertCircle, CheckCircle, LogIn, Download, Share } from 'lucide-react';
+import { Loader2, LogOut, LayoutDashboard, Store, ShoppingBag, User as UserIcon, Menu, ArrowLeft, Copy, ExternalLink, Trash2, Plus, X, Star, Mail, Lock, AlertCircle, CheckCircle, LogIn, Download, Share, QrCode } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'motion/react';
 
 // --- Types & Constants ---
@@ -80,7 +81,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error) {
+        console.warn('Auth session error:', error.message);
+        supabase.auth.signOut();
+        setLoading(false);
+        return;
+      }
       setUser(session?.user ?? null);
       if (session?.user) {
         fetchProfile(session.user.id);
@@ -89,7 +96,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        setUser(null);
+        setProfile(null);
+        setLoading(false);
+        return;
+      }
+
       setUser(session?.user ?? null);
       if (session?.user) {
         fetchProfile(session.user.id);
@@ -101,6 +115,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const supabase = getSupabase();
+    if (!supabase) return;
+
+    const updateLastSeen = async () => {
+      try {
+        await supabase
+          .from('profiles')
+          .update({ last_seen: new Date().toISOString() })
+          .eq('id', user.id);
+      } catch (err) {
+        console.error('Error updating last seen:', err);
+      }
+    };
+
+    updateLastSeen();
+    const interval = setInterval(updateLastSeen, 60000); // Update every minute
+
+    return () => clearInterval(interval);
+  }, [user]);
 
   const fetchProfile = async (uid: string) => {
     const supabase = getSupabase();
@@ -117,7 +153,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         uid: data.id,
         username: data.username,
         role: data.role as UserRole,
-        canteenId: data.canteen_id
+        canteenId: data.canteen_id,
+        phone: data.phone,
+        lastSeen: data.last_seen
       });
     }
     setLoading(false);
@@ -178,6 +216,7 @@ const Login = () => {
             .insert({
               id: data.user.id,
               username: name,
+              phone: phone,
               role: 'customer'
             });
           if (profileError) throw profileError;
@@ -273,15 +312,42 @@ const Login = () => {
 
 // --- Components ---
 
+const ShareModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.9 }}
+        className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl"
+      >
+        <div className="p-4 border-b border-zinc-800 flex justify-between items-center">
+          <h3 className="font-bold text-zinc-100">Share App</h3>
+          <button onClick={onClose} className="p-2 text-zinc-500 hover:text-zinc-300 transition-colors">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="p-6">
+          <ShareApp />
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
 const Navbar = () => {
   const { cart, setIsCartOpen } = useCart();
   const { user, profile, loading, logout } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
 
   const isAuthenticated = !!user || !!profile;
 
   return (
     <nav className="bg-zinc-900 border-b border-zinc-800 sticky top-0 z-50">
+      <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16 items-center">
           <Link to="/" className="flex items-center gap-2">
@@ -303,6 +369,14 @@ const Navbar = () => {
               <Store size={16} /> Marketplace
             </Link>
             
+            <button
+              onClick={() => setIsShareModalOpen(true)}
+              className="p-2 text-zinc-400 hover:text-emerald-500 transition-colors"
+              title="Share App"
+            >
+              <QrCode size={20} />
+            </button>
+
             <button
               onClick={() => setIsCartOpen(true)}
               className="relative p-2 text-zinc-400 hover:text-emerald-500 transition-colors"
@@ -372,6 +446,15 @@ const Navbar = () => {
             <Link to="/admin" onClick={() => setIsMenuOpen(false)} className="text-zinc-100 hover:text-emerald-500 transition-colors">Admin Portal</Link>
             <Link to="/owner" onClick={() => setIsMenuOpen(false)} className="text-zinc-100 hover:text-emerald-500 transition-colors">Canteen Portal</Link>
             <Link to="/orders" onClick={() => setIsMenuOpen(false)} className="text-zinc-100 hover:text-emerald-500 transition-colors">My Orders</Link>
+            <button 
+              onClick={() => {
+                setIsMenuOpen(false);
+                setIsShareModalOpen(true);
+              }}
+              className="text-zinc-100 hover:text-emerald-500 transition-colors text-left flex items-center gap-2"
+            >
+              <QrCode size={18} /> Share App
+            </button>
             <Link to="/explore" onClick={() => setIsMenuOpen(false)} className="text-zinc-100 hover:text-emerald-500 transition-colors">Marketplace</Link>
             {!loading && (
               isAuthenticated ? (
@@ -1702,6 +1785,73 @@ const SupabaseStatus = () => {
   );
 };
 
+const ShareApp = () => {
+  const appUrl = window.location.origin;
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(appUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800 shadow-sm flex flex-col items-center text-center">
+      <div className="w-12 h-12 bg-emerald-500/10 rounded-2xl flex items-center justify-center text-emerald-500 mb-4">
+        <QrCode size={24} />
+      </div>
+      <h3 className="text-lg font-semibold text-zinc-100 mb-2">Share CanteenConnect</h3>
+      <p className="text-sm text-zinc-400 mb-6">Let people scan this QR code to quickly access the app.</p>
+      
+      <div className="bg-white p-4 rounded-2xl mb-6 shadow-lg">
+        <QRCodeSVG 
+          value={appUrl} 
+          size={180}
+          level="H"
+          includeMargin={false}
+          imageSettings={{
+            src: "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=192&h=192&fit=crop&q=80",
+            x: undefined,
+            y: undefined,
+            height: 40,
+            width: 40,
+            excavate: true,
+          }}
+        />
+      </div>
+
+      <div className="w-full space-y-3">
+        <div className="flex items-center gap-2 bg-zinc-800 p-3 rounded-xl border border-zinc-700">
+          <p className="text-xs text-zinc-400 truncate flex-1">{appUrl}</p>
+          <button 
+            onClick={handleCopy}
+            className="text-emerald-500 hover:text-emerald-400 transition-colors"
+          >
+            {copied ? <CheckCircle size={18} /> : <Copy size={18} />}
+          </button>
+        </div>
+        
+        <button 
+          onClick={() => {
+            if (navigator.share) {
+              navigator.share({
+                title: 'CanteenConnect',
+                text: 'Order your favorite meals from your canteen!',
+                url: appUrl,
+              });
+            } else {
+              handleCopy();
+            }
+          }}
+          className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold transition-all"
+        >
+          <Share size={18} /> Share Link
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const AdminPortal = () => {
   const [canteens, setCanteens] = useState<Canteen[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -1712,7 +1862,7 @@ const AdminPortal = () => {
   const [isAdding, setIsAdding] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
-  const [activeTab, setActiveTab] = useState<'canteens' | 'supabase'>('canteens');
+  const [activeTab, setActiveTab] = useState<'canteens' | 'users' | 'supabase'>('canteens');
 
   const fetchCanteens = useCallback(async () => {
     const supabase = getSupabase();
@@ -1755,7 +1905,9 @@ const AdminPortal = () => {
           uid: d.id,
           username: d.username,
           role: d.role,
-          canteenId: d.canteen_id
+          canteenId: d.canteen_id,
+          phone: d.phone,
+          lastSeen: d.last_seen
         } as UserProfile)));
       }
     } catch (err) {
@@ -1996,6 +2148,10 @@ const AdminPortal = () => {
               </button>
             </form>
           </div>
+
+          <div className="mt-8">
+            <ShareApp />
+          </div>
         </div>
 
         <div className="lg:col-span-2 space-y-6">
@@ -2010,6 +2166,15 @@ const AdminPortal = () => {
               Canteens
             </button>
             <button
+              onClick={() => setActiveTab('users')}
+              className={cn(
+                "px-4 py-2 rounded-xl text-sm font-bold transition-all",
+                activeTab === 'users' ? "bg-emerald-600 text-white" : "bg-zinc-900 text-zinc-400 hover:bg-zinc-800"
+              )}
+            >
+              Users
+            </button>
+            <button
               onClick={() => setActiveTab('supabase')}
               className={cn(
                 "px-4 py-2 rounded-xl text-sm font-bold transition-all",
@@ -2021,179 +2186,217 @@ const AdminPortal = () => {
           </div>
 
           {activeTab === 'canteens' ? (
-            <>
-              <div className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800 shadow-sm">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold text-zinc-100">Canteens</h3>
-              {canteens.length > 0 && (
-                <button
-                  onClick={() => setIsDeletingAll(true)}
-                  className="text-xs flex items-center gap-1 text-red-500 hover:text-red-400 transition-colors px-3 py-1 rounded-lg border border-red-500/20 hover:bg-red-500/10"
-                >
-                  <Trash2 size={14} /> Delete All
-                </button>
+            <div className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800 shadow-sm">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold text-zinc-100">Canteens</h3>
+                {canteens.length > 0 && (
+                  <button
+                    onClick={() => setIsDeletingAll(true)}
+                    className="text-xs flex items-center gap-1 text-red-500 hover:text-red-400 transition-colors px-3 py-1 rounded-lg border border-red-500/20 hover:bg-red-500/10"
+                  >
+                    <Trash2 size={14} /> Delete All
+                  </button>
+                )}
+              </div>
+
+              {deleteStatus && (
+                <div className={cn(
+                  "mb-4 p-3 rounded-xl text-sm font-medium flex items-center justify-between",
+                  deleteStatus.type === 'success' ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" : "bg-red-500/10 text-red-500 border border-red-500/20"
+                )}>
+                  <span>{deleteStatus.message}</span>
+                  <button onClick={() => setDeleteStatus(null)} className="text-zinc-500 hover:text-zinc-300">✕</button>
+                </div>
               )}
-            </div>
 
-            {deleteStatus && (
-              <div className={cn(
-                "mb-4 p-3 rounded-xl text-sm font-medium flex items-center justify-between",
-                deleteStatus.type === 'success' ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" : "bg-red-500/10 text-red-500 border border-red-500/20"
-              )}>
-                <span>{deleteStatus.message}</span>
-                <button onClick={() => setDeleteStatus(null)} className="text-zinc-500 hover:text-zinc-300">✕</button>
-              </div>
-            )}
-
-            {isDeletingAll && (
-              <div className="mb-4 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl">
-                <p className="text-red-500 font-bold mb-2 text-sm">⚠️ Are you absolutely sure? This will delete ALL canteens.</p>
-                <div className="flex gap-2">
-                  <button 
-                    onClick={confirmDeleteAll}
-                    className="bg-red-600 text-white px-4 py-1 rounded-lg text-xs font-bold hover:bg-red-500"
-                  >
-                    Yes, Delete Everything
-                  </button>
-                  <button 
-                    onClick={() => setIsDeletingAll(false)}
-                    className="bg-zinc-800 text-zinc-100 px-4 py-1 rounded-lg text-xs font-bold hover:bg-zinc-700"
-                  >
-                    Cancel
-                  </button>
+              {isDeletingAll && (
+                <div className="mb-4 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl">
+                  <p className="text-red-500 font-bold mb-2 text-sm">⚠️ Are you absolutely sure? This will delete ALL canteens.</p>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={confirmDeleteAll}
+                      className="bg-red-600 text-white px-4 py-1 rounded-lg text-xs font-bold hover:bg-red-500"
+                    >
+                      Yes, Delete Everything
+                    </button>
+                    <button 
+                      onClick={() => setIsDeletingAll(false)}
+                      className="bg-zinc-800 text-zinc-100 px-4 py-1 rounded-lg text-xs font-bold hover:bg-zinc-700"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="border-b border-zinc-800">
-                    <th className="pb-3 font-medium text-zinc-500">Name</th>
-                    <th className="pb-3 font-medium text-zinc-500">Owner</th>
-                    <th className="pb-3 font-medium text-zinc-500">Contact</th>
-                    <th className="pb-3 font-medium text-zinc-500">Code</th>
-                    <th className="pb-3 font-medium text-zinc-500">Status</th>
-                    <th className="pb-3 font-medium text-zinc-500">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-800">
-                  {canteens.map(canteen => (
-                    <tr key={canteen.id}>
-                      <td className="py-4 font-medium text-zinc-100">{canteen.name}</td>
-                      <td className="py-4">
-                        <p className="text-sm font-semibold text-zinc-100">{canteen.ownerName}</p>
-                      </td>
-                      <td className="py-4">
-                        <div className="flex flex-col text-xs text-zinc-400">
-                          <span>{canteen.ownerEmail}</span>
-                          <span>{canteen.ownerPhone}</span>
-                        </div>
-                      </td>
-                      <td className="py-4">
-                        <div className="flex items-center gap-2">
-                          {canteen.ownerCode ? (
-                            <>
-                              <code className="bg-zinc-800 px-2 py-1 rounded text-emerald-400 font-mono text-sm border border-emerald-500/20">
-                                {canteen.ownerCode}
-                              </code>
-                              <button 
-                                onClick={() => {
-                                  navigator.clipboard.writeText(canteen.ownerCode);
-                                  alert('Code copied to clipboard!');
-                                }}
-                                className="p-1 text-zinc-500 hover:text-emerald-500 transition-colors"
-                                title="Copy Code"
-                              >
-                                <Copy size={14} />
-                              </button>
-                            </>
-                          ) : (
-                            <button
-                              onClick={() => generateMissingCode(canteen)}
-                              className="text-xs bg-emerald-600/10 text-emerald-500 px-2 py-1 rounded border border-emerald-500/20 hover:bg-emerald-600/20 transition-colors"
-                            >
-                              Generate Code
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-4">
-                        <span className={cn(
-                          "px-2 py-1 rounded-full text-xs font-semibold",
-                          canteen.status === 'active' ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
-                        )}>
-                          {canteen.status}
-                        </span>
-                      </td>
-                      <td className="py-4">
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => toggleCanteenStatus(canteen)}
-                            className={cn(
-                              "text-xs font-medium px-3 py-1 rounded-lg border transition-colors",
-                              canteen.status === 'active' ? "border-red-500/20 text-red-400 hover:bg-red-500/10" : "border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/10"
-                            )}
-                          >
-                            {canteen.status === 'active' ? 'Freeze' : 'Unfreeze'}
-                          </button>
-                          <Link
-                            to={`/canteen/${canteen.id}`}
-                            className="text-xs font-medium px-3 py-1 rounded-lg border border-zinc-700 text-zinc-400 hover:bg-zinc-800 transition-colors flex items-center gap-1"
-                          >
-                            <ExternalLink size={12} /> View
-                          </Link>
-                          <button
-                            onClick={() => setDeletingId(canteen.id)}
-                            className="p-2 text-zinc-500 hover:text-red-500 transition-colors rounded-lg hover:bg-red-500/10"
-                            title="Delete Canteen"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                        {deletingId === canteen.id && (
-                          <div className="mt-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
-                            <p className="text-red-500 text-xs font-bold mb-2">Delete "{canteen.name}"?</p>
-                            <div className="flex gap-2">
-                              <button 
-                                onClick={() => confirmDelete(canteen.id)}
-                                className="bg-red-600 text-white px-3 py-1 rounded-lg text-[10px] font-bold"
-                              >
-                                Confirm
-                              </button>
-                              <button 
-                                onClick={() => setDeletingId(null)}
-                                className="bg-zinc-800 text-zinc-100 px-3 py-1 rounded-lg text-[10px] font-bold"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </td>
+              )}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b border-zinc-800">
+                      <th className="pb-3 font-medium text-zinc-500">Name</th>
+                      <th className="pb-3 font-medium text-zinc-500">Owner</th>
+                      <th className="pb-3 font-medium text-zinc-500">Contact</th>
+                      <th className="pb-3 font-medium text-zinc-500">Code</th>
+                      <th className="pb-3 font-medium text-zinc-500">Status</th>
+                      <th className="pb-3 font-medium text-zinc-500">Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-              <div className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800 shadow-sm">
-                <h3 className="text-lg font-semibold mb-4 text-zinc-100">Users ({users.length})</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {users.map(u => (
-                    <div key={u.uid} className="flex items-center gap-3 p-3 rounded-2xl bg-zinc-800 border border-zinc-700">
-                      <div className="w-10 h-10 bg-zinc-700 rounded-full flex items-center justify-center">
-                        <UserIcon size={20} className="text-zinc-400" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-zinc-100 truncate max-w-[150px]">{u.username}</p>
-                        <p className="text-xs text-zinc-400 capitalize">{u.role}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800">
+                    {canteens.map(canteen => (
+                      <tr key={canteen.id}>
+                        <td className="py-4 font-medium text-zinc-100">{canteen.name}</td>
+                        <td className="py-4">
+                          <p className="text-sm font-semibold text-zinc-100">{canteen.ownerName}</p>
+                        </td>
+                        <td className="py-4">
+                          <div className="flex flex-col text-xs text-zinc-400">
+                            <span>{canteen.ownerEmail}</span>
+                            <span>{canteen.ownerPhone}</span>
+                          </div>
+                        </td>
+                        <td className="py-4">
+                          <div className="flex items-center gap-2">
+                            {canteen.ownerCode ? (
+                              <>
+                                <code className="bg-zinc-800 px-2 py-1 rounded text-emerald-400 font-mono text-sm border border-emerald-500/20">
+                                  {canteen.ownerCode}
+                                </code>
+                                <button 
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(canteen.ownerCode);
+                                    alert('Code copied to clipboard!');
+                                  }}
+                                  className="p-1 text-zinc-500 hover:text-emerald-500 transition-colors"
+                                  title="Copy Code"
+                                >
+                                  <Copy size={14} />
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                onClick={() => generateMissingCode(canteen)}
+                                className="text-xs bg-emerald-600/10 text-emerald-500 px-2 py-1 rounded border border-emerald-500/20 hover:bg-emerald-600/20 transition-colors"
+                              >
+                                Generate Code
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-4">
+                          <span className={cn(
+                            "px-2 py-1 rounded-full text-xs font-semibold",
+                            canteen.status === 'active' ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
+                          )}>
+                            {canteen.status}
+                          </span>
+                        </td>
+                        <td className="py-4">
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => toggleCanteenStatus(canteen)}
+                              className={cn(
+                                "text-xs font-medium px-3 py-1 rounded-lg border transition-colors",
+                                canteen.status === 'active' ? "border-red-500/20 text-red-400 hover:bg-red-500/10" : "border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/10"
+                              )}
+                            >
+                              {canteen.status === 'active' ? 'Freeze' : 'Unfreeze'}
+                            </button>
+                            <Link
+                              to={`/canteen/${canteen.id}`}
+                              className="text-xs font-medium px-3 py-1 rounded-lg border border-zinc-700 text-zinc-400 hover:bg-zinc-800 transition-colors flex items-center gap-1"
+                            >
+                              <ExternalLink size={12} /> View
+                            </Link>
+                            <button
+                              onClick={() => setDeletingId(canteen.id)}
+                              className="p-2 text-zinc-500 hover:text-red-500 transition-colors rounded-lg hover:bg-red-500/10"
+                              title="Delete Canteen"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                          {deletingId === canteen.id && (
+                            <div className="mt-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
+                              <p className="text-red-500 text-xs font-bold mb-2">Delete "{canteen.name}"?</p>
+                              <div className="flex gap-2">
+                                <button 
+                                  onClick={() => confirmDelete(canteen.id)}
+                                  className="bg-red-600 text-white px-3 py-1 rounded-lg text-[10px] font-bold"
+                                >
+                                  Confirm
+                                </button>
+                                <button 
+                                  onClick={() => setDeletingId(null)}
+                                  className="bg-zinc-800 text-zinc-100 px-3 py-1 rounded-lg text-[10px] font-bold"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            </>
+            </div>
+          ) : activeTab === 'users' ? (
+            <div className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800 shadow-sm">
+              <h3 className="text-lg font-semibold mb-6 text-zinc-100">Registered Users ({users.length})</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b border-zinc-800">
+                      <th className="pb-3 font-medium text-zinc-500">User</th>
+                      <th className="pb-3 font-medium text-zinc-500">Phone</th>
+                      <th className="pb-3 font-medium text-zinc-500">Role</th>
+                      <th className="pb-3 font-medium text-zinc-500">Status</th>
+                      <th className="pb-3 font-medium text-zinc-500">Last Seen</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800">
+                    {users.map(u => {
+                      const isOnline = u.lastSeen && (new Date().getTime() - new Date(u.lastSeen).getTime()) < 120000; // 2 minutes
+                      return (
+                        <tr key={u.uid}>
+                          <td className="py-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400 border border-zinc-700">
+                                <UserIcon size={14} />
+                              </div>
+                              <span className="font-medium text-zinc-100">{u.username}</span>
+                            </div>
+                          </td>
+                          <td className="py-4 text-sm text-zinc-400">{u.phone || 'N/A'}</td>
+                          <td className="py-4">
+                            <span className="text-xs px-2 py-1 bg-zinc-800 text-zinc-400 rounded-lg border border-zinc-700 capitalize">
+                              {u.role}
+                            </span>
+                          </td>
+                          <td className="py-4">
+                            <div className="flex items-center gap-2">
+                              <div className={cn(
+                                "w-2 h-2 rounded-full",
+                                isOnline ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-zinc-600"
+                              )} />
+                              <span className={cn(
+                                "text-xs font-medium",
+                                isOnline ? "text-emerald-500" : "text-zinc-500"
+                              )}>
+                                {isOnline ? 'Online' : 'Offline'}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-4 text-xs text-zinc-500">
+                            {u.lastSeen ? new Date(u.lastSeen).toLocaleString() : 'Never'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           ) : (
             <SupabaseStatus />
           )}
