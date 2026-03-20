@@ -1127,7 +1127,7 @@ const CartDrawer = ({ onClose }: { onClose: () => void }) => {
 };
 
 const ReviewModal = ({ order, onClose }: { order: Order; onClose: () => void }) => {
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1139,11 +1139,13 @@ const ReviewModal = ({ order, onClose }: { order: Order; onClose: () => void }) 
     const supabase = getSupabase();
     if (!supabase) return;
 
+    const currentUserId = profile?.uid || user?.id || 'guest';
+
     setIsSubmitting(true);
     setError(null);
     try {
       const { error: submitError } = await supabase.from('reviews').insert({
-        customer_id: profile!.uid,
+        customer_id: currentUserId,
         canteen_id: order.canteenId,
         rating,
         comment,
@@ -1268,25 +1270,27 @@ const ReviewModal = ({ order, onClose }: { order: Order; onClose: () => void }) 
 const ReviewButton = ({ order }: { order: Order }) => {
   const [showModal, setShowModal] = useState(false);
   const [hasReviewed, setHasReviewed] = useState(false);
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
 
   useEffect(() => {
     const checkReview = async () => {
-      if (!profile) return;
+      const currentUserId = profile?.uid || user?.id;
+      if (!currentUserId) return;
+      
       const supabase = getSupabase();
       if (!supabase) return;
 
       const { data, error } = await supabase
         .from('reviews')
         .select('id')
-        .eq('customer_id', profile.uid)
+        .eq('customer_id', currentUserId)
         .eq('canteen_id', order.canteenId)
         .limit(1);
 
       if (!error && data && data.length > 0) setHasReviewed(true);
     };
     checkReview();
-  }, [profile, order.canteenId]);
+  }, [profile, user, order.canteenId]);
 
   if (hasReviewed) return <p className="text-xs text-zinc-500 font-medium italic">Review submitted • Thank you!</p>;
 
