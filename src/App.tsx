@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, Component } from 'react';
+import React, { createContext, useContext, useEffect, useState, Component, useCallback } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useParams, useNavigate } from 'react-router-dom';
 import { User } from '@supabase/supabase-js';
 import { getSupabase, isSupabaseConfigured } from './supabase';
@@ -1628,55 +1628,59 @@ const AdminPortal = () => {
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState<'canteens' | 'supabase'>('canteens');
 
+  const fetchCanteens = useCallback(async () => {
+    const supabase = getSupabase();
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase.from('canteens').select('*');
+      if (error) throw error;
+      if (data) {
+        setCanteens(data.map(d => ({
+          id: d.id,
+          name: d.name,
+          ownerId: d.owner_id,
+          ownerName: d.owner_name,
+          ownerEmail: d.owner_email,
+          ownerPhone: d.owner_phone,
+          ownerCode: d.owner_code,
+          status: d.status,
+          ecoCashNumber: d.ecocash_number,
+          ecoCashRate: d.ecocash_rate,
+          address: d.address,
+          notice: d.notice,
+          isAcceptingOrders: d.is_accepting_orders,
+          rating: d.rating,
+          reviewCount: d.review_count
+        } as Canteen)));
+      }
+    } catch (err) {
+      console.error('Error fetching canteens in admin:', err);
+    }
+  }, []);
+
+  const fetchUsers = useCallback(async () => {
+    const supabase = getSupabase();
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase.from('profiles').select('*');
+      if (error) throw error;
+      if (data) {
+        setUsers(data.map(d => ({
+          uid: d.id,
+          username: d.username,
+          role: d.role,
+          canteenId: d.canteen_id
+        } as UserProfile)));
+      }
+    } catch (err) {
+      console.error('Error fetching users in admin:', err);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isAdminAuthenticated) return;
     const supabase = getSupabase();
     if (!supabase) return;
-
-    const fetchCanteens = async () => {
-      try {
-        const { data, error } = await supabase.from('canteens').select('*');
-        if (error) throw error;
-        if (data) {
-          setCanteens(data.map(d => ({
-            id: d.id,
-            name: d.name,
-            ownerId: d.owner_id,
-            ownerName: d.owner_name,
-            ownerEmail: d.owner_email,
-            ownerPhone: d.owner_phone,
-            ownerCode: d.owner_code,
-            status: d.status,
-            ecoCashNumber: d.ecocash_number,
-            ecoCashRate: d.ecocash_rate,
-            address: d.address,
-            notice: d.notice,
-            isAcceptingOrders: d.is_accepting_orders,
-            rating: d.rating,
-            reviewCount: d.review_count
-          } as Canteen)));
-        }
-      } catch (err) {
-        console.error('Error fetching canteens in admin:', err);
-      }
-    };
-
-    const fetchUsers = async () => {
-      try {
-        const { data, error } = await supabase.from('profiles').select('*');
-        if (error) throw error;
-        if (data) {
-          setUsers(data.map(d => ({
-            uid: d.id,
-            username: d.username,
-            role: d.role,
-            canteenId: d.canteen_id
-          } as UserProfile)));
-        }
-      } catch (err) {
-        console.error('Error fetching users in admin:', err);
-      }
-    };
 
     fetchCanteens();
     fetchUsers();
@@ -1699,7 +1703,7 @@ const AdminPortal = () => {
       supabase.removeChannel(canteensChannel);
       supabase.removeChannel(usersChannel);
     };
-  }, [isAdminAuthenticated]);
+  }, [isAdminAuthenticated, fetchCanteens, fetchUsers]);
 
   const handleAddCanteen = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1725,6 +1729,8 @@ const AdminPortal = () => {
 
       if (error) throw error;
       
+      await fetchCanteens();
+      
       alert(`✅ Canteen registered successfully!\n\nOwner Code: ${ownerCode}\n\nGive this code to the canteen owner so they can claim their portal.`);
       setNewCanteenName('');
       setNewOwnerName('');
@@ -1743,6 +1749,7 @@ const AdminPortal = () => {
     const supabase = getSupabase();
     if (!supabase) return;
     await supabase.from('canteens').update({ status: newStatus }).eq('id', canteen.id);
+    await fetchCanteens();
   };
 
   const generateMissingCode = async (canteen: Canteen) => {
@@ -1751,6 +1758,7 @@ const AdminPortal = () => {
     if (!supabase) return;
     try {
       await supabase.from('canteens').update({ owner_code: ownerCode }).eq('id', canteen.id);
+      await fetchCanteens();
       alert(`Code generated for ${canteen.name}: ${ownerCode}`);
     } catch (error) {
       console.error(error);
@@ -1772,6 +1780,7 @@ const AdminPortal = () => {
     try {
       const { error } = await supabase.from('canteens').delete().eq('id', canteenId);
       if (error) throw error;
+      await fetchCanteens();
       setDeleteStatus({ message: `✅ Canteen "${canteen.name}" deleted successfully`, type: 'success' });
       setDeletingId(null);
     } catch (error: any) {
@@ -1788,6 +1797,7 @@ const AdminPortal = () => {
     try {
       const { error } = await supabase.from('canteens').delete().neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all
       if (error) throw error;
+      await fetchCanteens();
       setDeleteStatus({ message: `✅ Successfully deleted all canteens.`, type: 'success' });
     } catch (error: any) {
       console.error('Delete all error:', error);
