@@ -2068,6 +2068,8 @@ const OwnerPortal = () => {
         description: d.description,
         imageUrl: d.image_url
       } as MenuItem)));
+    } else if (menuError) {
+      console.error('Error fetching menu items:', menuError);
     }
 
     const { data: orderData, error: orderError } = await supabase
@@ -2102,13 +2104,25 @@ const OwnerPortal = () => {
 
       // Real-time subscription
       const channel = supabase
-        .channel(`canteen-orders-${canteen.id}`)
+        .channel(`canteen-updates-${canteen.id}`)
         .on(
           'postgres_changes',
           {
             event: '*',
             schema: 'public',
             table: 'orders',
+            filter: `canteen_id=eq.${canteen.id}`
+          },
+          () => {
+            fetchCanteenData(canteen.id);
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'menu_items',
             filter: `canteen_id=eq.${canteen.id}`
           },
           () => {
@@ -2392,9 +2406,17 @@ const OwnerPortal = () => {
                     </button>
                     <button 
                       onClick={async () => {
+                        if (!window.confirm('Are you sure you want to delete this item?')) return;
                         const supabase = getSupabase();
                         if (!supabase) return;
-                        await supabase.from('menu_items').delete().eq('id', item.id);
+                        try {
+                          const { error } = await supabase.from('menu_items').delete().eq('id', item.id);
+                          if (error) throw error;
+                          if (canteen) await fetchCanteenData(canteen.id);
+                        } catch (err: any) {
+                          console.error('Delete failed:', err);
+                          alert(`❌ Delete failed: ${err.message || 'Unknown error'}`);
+                        }
                       }}
                       className="p-2 text-zinc-400 hover:text-red-500 bg-zinc-900 rounded-lg border border-zinc-800"
                     >
@@ -2444,16 +2466,20 @@ const OwnerPortal = () => {
                       };
 
                       if (editingItem) {
-                        await supabase.from('menu_items').update(itemData).eq('id', editingItem.id);
+                        const { error } = await supabase.from('menu_items').update(itemData).eq('id', editingItem.id);
+                        if (error) throw error;
                       } else {
-                        await supabase.from('menu_items').insert(itemData);
+                        const { error } = await supabase.from('menu_items').insert(itemData);
+                        if (error) throw error;
                       }
                       
+                      await fetchCanteenData(canteen.id);
                       setNewItem({ name: '', price: '', description: '', imageUrl: '' });
                       setIsItemModalOpen(false);
                       setEditingItem(null);
-                    } catch (err) {
-                      console.error(err);
+                    } catch (err: any) {
+                      console.error('Menu item operation failed:', err);
+                      alert(`❌ Operation failed: ${err.message || 'Unknown error'}`);
                     } finally {
                       setIsSubmitting(false);
                     }
