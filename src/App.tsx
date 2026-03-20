@@ -1131,6 +1131,8 @@ const ReviewModal = ({ order, onClose }: { order: Order; onClose: () => void }) 
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async () => {
     if (rating === 0) return;
@@ -1138,15 +1140,16 @@ const ReviewModal = ({ order, onClose }: { order: Order; onClose: () => void }) 
     if (!supabase) return;
 
     setIsSubmitting(true);
+    setError(null);
     try {
-      const { error } = await supabase.from('reviews').insert({
+      const { error: submitError } = await supabase.from('reviews').insert({
         customer_id: profile!.uid,
         canteen_id: order.canteenId,
         rating,
         comment,
       });
 
-      if (error) throw error;
+      if (submitError) throw submitError;
 
       // Update canteen rating (simplified)
       const { data: canteenData, error: canteenError } = await supabase
@@ -1166,13 +1169,41 @@ const ReviewModal = ({ order, onClose }: { order: Order; onClose: () => void }) 
           review_count: newCount
         }).eq('id', order.canteenId);
       }
-      onClose();
-    } catch (error) {
-      console.error("Error submitting review:", error);
+      
+      setIsSuccess(true);
+      setTimeout(() => {
+        onClose();
+      }, 2000);
+    } catch (err: any) {
+      console.error("Error submitting review:", err);
+      setError(err.message || "Failed to submit review. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  if (isSuccess) {
+    return (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+        <motion.div
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="bg-zinc-900 border border-zinc-800 p-10 rounded-[2.5rem] w-full max-w-md shadow-2xl text-center"
+        >
+          <motion.div 
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            transition={{ type: "spring", damping: 12, stiffness: 200 }}
+            className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center text-emerald-500 mx-auto mb-6"
+          >
+            <CheckCircle size={48} />
+          </motion.div>
+          <h3 className="text-2xl font-bold text-zinc-100 mb-2">Thank You!</h3>
+          <p className="text-zinc-400">Your review has been submitted successfully.</p>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
@@ -1189,6 +1220,13 @@ const ReviewModal = ({ order, onClose }: { order: Order; onClose: () => void }) 
         </div>
 
         <div className="space-y-6">
+          {error && (
+            <div className="bg-red-500/10 border border-red-500/20 text-red-500 p-4 rounded-2xl flex items-center gap-3 text-sm">
+              <AlertCircle size={18} />
+              <p>{error}</p>
+            </div>
+          )}
+
           <div className="flex justify-center gap-2">
             {[1, 2, 3, 4, 5].map((star) => (
               <button
