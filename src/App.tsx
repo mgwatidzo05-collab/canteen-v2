@@ -1260,24 +1260,39 @@ const MyOrders = () => {
     if (!supabase) return;
 
     const fetchOrders = async () => {
+      if (authLoading) return;
+
+      const supabase = getSupabase();
+      if (!supabase) return;
+
       let query = supabase.from('orders').select('*');
       
-      if (profile?.uid === 'guest') {
+      // If user is logged in but profile is still null, we should wait or use user.id
+      const currentUserId = profile?.uid || user?.id;
+      
+      if (!currentUserId) {
+        // Guest mode
         const guestOrders = JSON.parse(localStorage.getItem('guest_orders') || '[]');
         if (guestOrders.length === 0) {
           setOrders([]);
           setLoading(false);
           return;
         }
-        query = query.in('id', guestOrders);
-      } else if (profile) {
-        query = query.eq('customer_id', profile.uid);
+        // Convert IDs to numbers if they are stored as strings but the DB expects numbers
+        const numericIds = guestOrders.map((id: string) => {
+          const num = Number(id);
+          return isNaN(num) ? id : num;
+        });
+        query = query.in('id', numericIds);
       } else {
-        setLoading(false);
-        return;
+        query = query.eq('customer_id', currentUserId);
       }
 
       const { data, error } = await query.order('created_at', { ascending: false });
+
+      if (error) {
+        console.error("Error fetching orders:", error);
+      }
 
       if (!error && data) {
         setOrders(data.map(d => ({
@@ -1299,14 +1314,14 @@ const MyOrders = () => {
     fetchOrders();
 
     const channel = supabase
-      .channel(`my-orders-${profile?.uid || 'guest'}`)
+      .channel(`my-orders-${profile?.uid || user?.id || 'guest'}`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'orders',
-          filter: profile?.uid && profile.uid !== 'guest' ? `customer_id=eq.${profile.uid}` : undefined
+          filter: (profile?.uid || user?.id) ? `customer_id=eq.${profile?.uid || user?.id}` : undefined
         },
         () => {
           fetchOrders();
@@ -1317,7 +1332,7 @@ const MyOrders = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [profile]);
+  }, [profile, user, authLoading]);
 
   if (loading) return <Loader2 className="animate-spin mx-auto text-emerald-500" size={32} />;
 
