@@ -4,7 +4,7 @@ import { User } from '@supabase/supabase-js';
 import { getSupabase, isSupabaseConfigured } from './supabase';
 import { UserProfile, UserRole, Canteen, MenuItem, Order, CartItem, OrderStatus } from './types';
 import { cn } from './lib/utils';
-import { Loader2, LogOut, LayoutDashboard, Store, ShoppingBag, User as UserIcon, Menu, ArrowLeft, Copy, ExternalLink, Trash2, Plus, X, Star, Mail, Lock, AlertCircle, CheckCircle } from 'lucide-react';
+import { Loader2, LogOut, LayoutDashboard, Store, ShoppingBag, User as UserIcon, Menu, ArrowLeft, Copy, ExternalLink, Trash2, Plus, X, Star, Mail, Lock, AlertCircle, CheckCircle, LogIn } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 // --- Types & Constants ---
@@ -877,6 +877,11 @@ const CartContent = () => {
   }, [cart]);
 
   const handleCheckout = async () => {
+    if (!user) {
+      setError("Please sign in to place an order.");
+      return;
+    }
+    
     setError(null);
     if (!canteen) return setError("Canteen info not loaded.");
     if (!customerName.trim()) return setError("Please enter your name.");
@@ -887,7 +892,7 @@ const CartContent = () => {
 
     setIsSubmitting(true);
     try {
-      const customerId = user?.id || profile?.uid || 'guest';
+      const customerId = user.id;
 
       const { data: insertedData, error: insertError } = await supabase.from('orders').insert({
         customer_id: customerId,
@@ -904,12 +909,10 @@ const CartContent = () => {
 
       const orderId = insertedData.id.toString();
 
-      // Track guest orders
-      if (customerId === 'guest') {
-        const guestOrders = JSON.parse(localStorage.getItem('guest_orders') || '[]');
-        guestOrders.push(orderId);
-        localStorage.setItem('guest_orders', JSON.stringify(guestOrders));
-      }
+      // Track orders for the current user
+      const userOrders = JSON.parse(localStorage.getItem(`orders_${customerId}`) || '[]');
+      userOrders.push(orderId);
+      localStorage.setItem(`orders_${customerId}`, JSON.stringify(userOrders));
 
       clearCart();
       setOrderSuccess(orderId);
@@ -1042,7 +1045,16 @@ const CartContent = () => {
         {error && (
           <div className="flex items-center gap-2 text-red-500 text-xs bg-red-500/10 p-3 rounded-xl border border-red-500/20">
             <AlertCircle size={14} />
-            <span>{error}</span>
+            <span className="flex-1">{error}</span>
+            {!user && (
+              <Link 
+                to="/login" 
+                onClick={() => setIsCartOpen(false)}
+                className="bg-red-500 text-white px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-red-600 transition-all"
+              >
+                Sign In
+              </Link>
+            )}
           </div>
         )}
         
@@ -1051,8 +1063,14 @@ const CartContent = () => {
           disabled={isSubmitting || !canteen}
           className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-emerald-600/20 flex items-center justify-center gap-2"
         >
-          {isSubmitting ? <Loader2 className="animate-spin" size={20} /> : <CheckCircle size={20} />}
-          {isSubmitting ? 'Processing...' : 'Confirm & Place Order'}
+          {isSubmitting ? (
+            <Loader2 className="animate-spin" size={20} />
+          ) : !user ? (
+            <LogIn size={20} />
+          ) : (
+            <CheckCircle size={20} />
+          )}
+          {isSubmitting ? 'Processing...' : !user ? 'Sign In to Order' : 'Confirm & Place Order'}
         </button>
         
         <p className="text-[10px] text-center text-zinc-500">
@@ -1267,25 +1285,36 @@ const MyOrders = () => {
 
       let query = supabase.from('orders').select('*');
       
-      // If user is logged in but profile is still null, we should wait or use user.id
       const currentUserId = profile?.uid || user?.id;
       
       if (!currentUserId) {
-        // Guest mode
+        // Guest mode (though now restricted, keep for legacy/robustness)
         const guestOrders = JSON.parse(localStorage.getItem('guest_orders') || '[]');
         if (guestOrders.length === 0) {
           setOrders([]);
           setLoading(false);
           return;
         }
-        // Convert IDs to numbers if they are stored as strings but the DB expects numbers
         const numericIds = guestOrders.map((id: string) => {
           const num = Number(id);
           return isNaN(num) ? id : num;
         });
         query = query.in('id', numericIds);
       } else {
-        query = query.eq('customer_id', currentUserId);
+        // Logged in mode: Check both customer_id and local storage for this user
+        const userOrders = JSON.parse(localStorage.getItem(`orders_${currentUserId}`) || '[]');
+        const numericIds = userOrders.map((id: string) => {
+          const num = Number(id);
+          return isNaN(num) ? id : num;
+        });
+
+        if (numericIds.length > 0) {
+          // Use OR logic: either customer_id matches OR the ID is in our local list
+          // This handles cases where RLS might be tricky or if the user just placed the order
+          query = query.or(`customer_id.eq.${currentUserId},id.in.(${numericIds.join(',')})`);
+        } else {
+          query = query.eq('customer_id', currentUserId);
+        }
       }
 
       const { data, error } = await query.order('created_at', { ascending: false });
@@ -1422,7 +1451,16 @@ const MyOrders = () => {
           <div className="col-span-full py-20 text-center bg-zinc-900 rounded-[2.5rem] border border-zinc-800 border-dashed">
             <ShoppingBag className="mx-auto text-zinc-800 mb-4" size={48} />
             <p className="text-zinc-500 text-lg">No orders found yet.</p>
-            <Link to="/explore" className="text-emerald-500 font-bold mt-4 inline-block hover:underline">Start Ordering</Link>
+            {!user && !authLoading ? (
+              <div className="mt-4 space-y-4">
+                <p className="text-zinc-400 text-sm">Sign in to view your order history and track active orders.</p>
+                <Link to="/login" className="bg-emerald-500 text-white px-8 py-3 rounded-2xl font-bold hover:bg-emerald-600 transition-all inline-block shadow-lg shadow-emerald-500/20">
+                  Sign In Now
+                </Link>
+              </div>
+            ) : (
+              <Link to="/explore" className="text-emerald-500 font-bold mt-4 inline-block hover:underline">Start Ordering</Link>
+            )}
           </div>
         )}
       </div>
