@@ -90,7 +90,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       setUser(session?.user ?? null);
       if (session?.user) {
-        fetchProfile(session.user.id);
+        fetchProfile(session.user.id, session.user);
       } else {
         setLoading(false);
       }
@@ -106,7 +106,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       setUser(session?.user ?? null);
       if (session?.user) {
-        fetchProfile(session.user.id);
+        fetchProfile(session.user.id, session.user);
       } else {
         setProfile(null);
         setLoading(false);
@@ -138,7 +138,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => clearInterval(interval);
   }, [user]);
 
-  const fetchProfile = async (uid: string) => {
+  const fetchProfile = async (uid: string, currentUser?: User | null) => {
     const supabase = getSupabase();
     if (!supabase) return;
 
@@ -149,12 +149,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .single();
 
     if (!error && data) {
+      let phone = data.phone;
+      
+      // If phone is missing in profile, try to extract from email
+      if (!phone && currentUser?.email?.endsWith('@canteenconnect.com')) {
+        phone = currentUser.email.split('@')[0];
+        // Update profile with extracted phone
+        await supabase.from('profiles').update({ phone }).eq('id', uid);
+      }
+
       setProfile({
         uid: data.id,
         username: data.username,
         role: data.role as UserRole,
         canteenId: data.canteen_id,
-        phone: data.phone,
+        phone: phone,
         lastSeen: data.last_seen
       });
     }
@@ -217,6 +226,7 @@ const Login = () => {
               id: data.user.id,
               username: name,
               phone: phone,
+              email: email,
               role: 'customer'
             });
           if (profileError) throw profileError;
@@ -1906,6 +1916,7 @@ const AdminPortal = () => {
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState<'canteens' | 'users' | 'supabase'>('canteens');
   const [userSearch, setUserSearch] = useState('');
+  const [now, setNow] = useState(new Date());
 
   const fetchCanteens = useCallback(async () => {
     const supabase = getSupabase();
@@ -1944,14 +1955,22 @@ const AdminPortal = () => {
       const { data, error } = await supabase.from('profiles').select('*');
       if (error) throw error;
       if (data) {
-        setUsers(data.map(d => ({
-          uid: d.id,
-          username: d.username,
-          role: d.role,
-          canteenId: d.canteen_id,
-          phone: d.phone,
-          lastSeen: d.last_seen
-        } as UserProfile)));
+        setUsers(data.map(d => {
+          let phone = d.phone;
+          // Try to recover phone from email if missing
+          if (!phone && d.email && d.email.endsWith('@canteenconnect.com')) {
+            phone = d.email.split('@')[0];
+          }
+          
+          return {
+            uid: d.id,
+            username: d.username,
+            role: d.role,
+            canteenId: d.canteen_id,
+            phone: phone,
+            lastSeen: d.last_seen
+          } as UserProfile;
+        }));
       }
     } catch (err) {
       console.error('Error fetching users in admin:', err);
@@ -1980,9 +1999,17 @@ const AdminPortal = () => {
       })
       .subscribe();
 
+    // Polling fallback for real-time and to keep online status fresh
+    const pollInterval = setInterval(() => {
+      fetchCanteens();
+      fetchUsers();
+      setNow(new Date());
+    }, 30000); // Poll every 30 seconds
+
     return () => {
       supabase.removeChannel(canteensChannel);
       supabase.removeChannel(usersChannel);
+      clearInterval(pollInterval);
     };
   }, [isAdminAuthenticated, fetchCanteens, fetchUsers]);
 
@@ -2423,7 +2450,7 @@ const AdminPortal = () => {
                         (u.phone && u.phone.includes(userSearch))
                       )
                       .map(u => {
-                      const isOnline = u.lastSeen && (new Date().getTime() - new Date(u.lastSeen).getTime()) < 120000; // 2 minutes
+                      const isOnline = u.lastSeen && (now.getTime() - new Date(u.lastSeen).getTime()) < 120000; // 2 minutes
                       return (
                         <tr key={u.uid}>
                           <td className="py-4">
