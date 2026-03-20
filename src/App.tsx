@@ -4,7 +4,7 @@ import { User } from '@supabase/supabase-js';
 import { getSupabase, isSupabaseConfigured } from './supabase';
 import { UserProfile, UserRole, Canteen, MenuItem, Order, CartItem, OrderStatus } from './types';
 import { cn } from './lib/utils';
-import { Loader2, LogOut, LayoutDashboard, Store, ShoppingBag, User as UserIcon, Menu, ArrowLeft, Copy, ExternalLink, Trash2, Plus, X, Star, Mail, Lock, AlertCircle, CheckCircle, LogIn } from 'lucide-react';
+import { Loader2, LogOut, LayoutDashboard, Store, ShoppingBag, User as UserIcon, Menu, ArrowLeft, Copy, ExternalLink, Trash2, Plus, X, Star, Mail, Lock, AlertCircle, CheckCircle, LogIn, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 // --- Types & Constants ---
@@ -454,6 +454,67 @@ export const useCart = () => {
   if (!context) throw new Error('useCart must be used within CartProvider');
   return context;
 };
+// --- PWA Install Prompt ---
+const InstallPrompt = () => {
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    const handler = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setIsVisible(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handler);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handler);
+    };
+  }, []);
+
+  const handleInstall = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null);
+      setIsVisible(false);
+    }
+  };
+
+  if (!isVisible) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 50 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="fixed bottom-24 left-8 right-8 md:left-auto md:right-8 md:w-80 z-50 bg-zinc-900 border border-zinc-800 p-4 rounded-2xl shadow-2xl flex flex-col gap-3"
+    >
+      <div className="flex items-start justify-between">
+        <div className="flex gap-3">
+          <div className="w-10 h-10 bg-emerald-500/10 rounded-xl flex items-center justify-center text-emerald-500">
+            <Download size={20} />
+          </div>
+          <div>
+            <h4 className="text-sm font-bold text-zinc-100">Install App</h4>
+            <p className="text-xs text-zinc-500">Add CanteenConnect to your home screen for quick access.</p>
+          </div>
+        </div>
+        <button onClick={() => setIsVisible(false)} className="text-zinc-600 hover:text-zinc-400">
+          <X size={16} />
+        </button>
+      </div>
+      <button
+        onClick={handleInstall}
+        className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-xl text-xs font-bold transition-colors"
+      >
+        Install Now
+      </button>
+    </motion.div>
+  );
+};
+
 const MainLayout = ({ children }: { children: React.ReactNode }) => {
   const { isCartOpen, setIsCartOpen, cart } = useCart();
   const cartItemCount = cart.reduce((acc, curr) => acc + curr.quantity, 0);
@@ -464,6 +525,8 @@ const MainLayout = ({ children }: { children: React.ReactNode }) => {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {children}
       </main>
+      
+      <InstallPrompt />
       
       {/* Floating Cart Button */}
       {!isCartOpen && cartItemCount > 0 && (
