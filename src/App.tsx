@@ -4,7 +4,7 @@ import { User } from '@supabase/supabase-js';
 import { getSupabase, isSupabaseConfigured } from './supabase';
 import { UserProfile, UserRole, Canteen, MenuItem, Order, CartItem, OrderStatus } from './types';
 import { cn } from './lib/utils';
-import { Loader2, LogOut, LayoutDashboard, Store, ShoppingBag, User as UserIcon, Menu, ArrowLeft, Copy, ExternalLink, Trash2, Plus, X, Star, Mail, Lock, AlertCircle, CheckCircle, LogIn, Download } from 'lucide-react';
+import { Loader2, LogOut, LayoutDashboard, Store, ShoppingBag, User as UserIcon, Menu, ArrowLeft, Copy, ExternalLink, Trash2, Plus, X, Star, Mail, Lock, AlertCircle, CheckCircle, LogIn, Download, Share } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 // --- Types & Constants ---
@@ -458,8 +458,18 @@ export const useCart = () => {
 const InstallPrompt = () => {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isVisible, setIsVisible] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
 
   useEffect(() => {
+    // Check if it's iOS
+    const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone;
+    
+    if (isIOSDevice && !isStandalone) {
+      setIsIOS(true);
+      setIsVisible(true);
+    }
+
     const handler = (e: any) => {
       e.preventDefault();
       setDeferredPrompt(e);
@@ -493,24 +503,37 @@ const InstallPrompt = () => {
     >
       <div className="flex items-start justify-between">
         <div className="flex gap-3">
-          <div className="w-10 h-10 bg-emerald-500/10 rounded-xl flex items-center justify-center text-emerald-500">
-            <Download size={20} />
+          <div className="w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 border border-zinc-800">
+            <img 
+              src="https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=192&h=192&fit=crop&q=80" 
+              alt="App Icon" 
+              className="w-full h-full object-cover"
+              referrerPolicy="no-referrer"
+            />
           </div>
           <div>
-            <h4 className="text-sm font-bold text-zinc-100">Install App</h4>
-            <p className="text-xs text-zinc-500">Add CanteenConnect to your home screen for quick access.</p>
+            <h4 className="text-sm font-bold text-zinc-100">Install CanteenConnect</h4>
+            {isIOS ? (
+              <p className="text-xs text-zinc-500">
+                Tap the <Share size={14} className="inline mx-1 text-emerald-500" /> button and then <span className="text-zinc-300 font-bold">"Add to Home Screen"</span> to install.
+              </p>
+            ) : (
+              <p className="text-xs text-zinc-500">Order your favorite meals faster by adding this app to your home screen.</p>
+            )}
           </div>
         </div>
         <button onClick={() => setIsVisible(false)} className="text-zinc-600 hover:text-zinc-400">
           <X size={16} />
         </button>
       </div>
-      <button
-        onClick={handleInstall}
-        className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-xl text-xs font-bold transition-colors"
-      >
-        Install Now
-      </button>
+      {!isIOS && (
+        <button
+          onClick={handleInstall}
+          className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-xl text-xs font-bold transition-colors"
+        >
+          Install Now
+        </button>
+      )}
     </motion.div>
   );
 };
