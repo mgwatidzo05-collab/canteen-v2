@@ -762,8 +762,8 @@ const ExploreCanteens = () => {
 
   return (
     <div className="space-y-12">
-      <header className="relative overflow-hidden rounded-[2.5rem] bg-zinc-900 p-8 md:p-12 border border-zinc-800">
-        <div className="relative z-10 max-w-2xl">
+      <header className="relative overflow-hidden rounded-[2.5rem] bg-zinc-900 p-8 md:p-12 border border-zinc-800 flex flex-col md:flex-row gap-8 items-center">
+        <div className="relative z-10 flex-1">
           <h2 className="text-4xl md:text-5xl font-black text-zinc-100 mb-4 tracking-tight">
             Delicious meals, <span className="text-emerald-500">ready</span> for collection.
           </h2>
@@ -774,6 +774,14 @@ const ExploreCanteens = () => {
             </Link>
           )}
         </div>
+        
+        <div className="hidden lg:flex flex-col items-center bg-white p-4 rounded-3xl shadow-2xl shadow-emerald-500/10 border border-zinc-800/10">
+          <div className="bg-zinc-100 p-2 rounded-2xl mb-2">
+            <QRCodeSVG value={window.location.origin} size={120} level="H" />
+          </div>
+          <p className="text-[10px] font-black text-zinc-900 tracking-widest uppercase">Scan to Share</p>
+        </div>
+        
         <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 blur-[100px] rounded-full -mr-20 -mt-20" />
       </header>
 
@@ -816,6 +824,40 @@ const ExploreCanteens = () => {
               </div>
             </Link>
           ))}
+        </div>
+      </section>
+
+      <section className="bg-zinc-900/50 border border-zinc-800 rounded-[2.5rem] p-8 md:p-12">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+          <div>
+            <h3 className="text-3xl font-black text-zinc-100 mb-4 tracking-tight">Help us grow the <span className="text-emerald-500">community</span>.</h3>
+            <p className="text-zinc-400 text-lg mb-8">Share CanteenConnect with your friends and colleagues to make campus dining easier for everyone.</p>
+            <div className="flex flex-wrap gap-4">
+              <div className="flex items-center gap-3 bg-zinc-800 p-4 rounded-2xl border border-zinc-700">
+                <div className="w-10 h-10 bg-emerald-500/10 rounded-xl flex items-center justify-center text-emerald-500">
+                  <CheckCircle size={20} />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-zinc-100">Fast Ordering</p>
+                  <p className="text-xs text-zinc-500">Skip the long queues</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 bg-zinc-800 p-4 rounded-2xl border border-zinc-700">
+                <div className="w-10 h-10 bg-emerald-500/10 rounded-xl flex items-center justify-center text-emerald-500">
+                  <CheckCircle size={20} />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-zinc-100">Live Updates</p>
+                  <p className="text-xs text-zinc-500">Know when it's ready</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-center md:justify-end">
+            <div className="w-full max-w-sm">
+              <ShareApp />
+            </div>
+          </div>
         </div>
       </section>
     </div>
@@ -1863,6 +1905,7 @@ const AdminPortal = () => {
   const [adminPassword, setAdminPassword] = useState('');
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState<'canteens' | 'users' | 'supabase'>('canteens');
+  const [userSearch, setUserSearch] = useState('');
 
   const fetchCanteens = useCallback(async () => {
     const supabase = getSupabase();
@@ -2342,7 +2385,26 @@ const AdminPortal = () => {
             </div>
           ) : activeTab === 'users' ? (
             <div className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800 shadow-sm">
-              <h3 className="text-lg font-semibold mb-6 text-zinc-100">Registered Users ({users.length})</h3>
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                <div>
+                  <h3 className="text-lg font-semibold text-zinc-100">Registered Users ({users.length})</h3>
+                  <p className="text-xs text-zinc-500">Total accounts in the system</p>
+                </div>
+                
+                <div className="relative flex-1 max-w-md">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-zinc-500">
+                    <Menu size={16} />
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Search by name or phone..."
+                    value={userSearch}
+                    onChange={(e) => setUserSearch(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 bg-zinc-800 border border-zinc-700 rounded-xl text-sm text-zinc-100 focus:border-emerald-500 outline-none transition-colors"
+                  />
+                </div>
+              </div>
+
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
                   <thead>
@@ -2355,7 +2417,12 @@ const AdminPortal = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800">
-                    {users.map(u => {
+                    {users
+                      .filter(u => 
+                        u.username.toLowerCase().includes(userSearch.toLowerCase()) || 
+                        (u.phone && u.phone.includes(userSearch))
+                      )
+                      .map(u => {
                       const isOnline = u.lastSeen && (new Date().getTime() - new Date(u.lastSeen).getTime()) < 120000; // 2 minutes
                       return (
                         <tr key={u.uid}>
