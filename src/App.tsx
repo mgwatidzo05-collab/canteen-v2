@@ -1178,6 +1178,12 @@ const CanteenDetails = () => {
             <span className="text-zinc-500 text-sm">{canteen.reviewCount} reviews</span>
           </div>
         </div>
+        {!canteen.isAcceptingOrders && (
+          <div className="bg-red-500/10 border border-red-500/20 px-4 py-2 rounded-2xl flex items-center gap-2 text-red-500 animate-pulse">
+            <AlertCircle size={18} />
+            <span className="text-xs font-black uppercase tracking-widest">Closed to Orders</span>
+          </div>
+        )}
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1318,6 +1324,10 @@ const CartContent = () => {
     
     setError(null);
     if (!canteen) return setError("Canteen info not loaded.");
+    if (!canteen.isAcceptingOrders) {
+      setError("This canteen is currently closed and not accepting orders.");
+      return;
+    }
     if (!customerName.trim()) return setError("Please enter your name.");
     
     const supabase = getSupabase();
@@ -3082,19 +3092,32 @@ const OwnerPortal = () => {
           <p className="text-zinc-400">Canteen Management Portal</p>
         </div>
         <div className="flex gap-3">
-          <button
-            onClick={async () => {
-              const supabase = getSupabase();
-              if (!supabase) return;
-              await supabase.from('canteens').update({ is_accepting_orders: !canteen?.isAcceptingOrders }).eq('id', canteen!.id);
-            }}
-            className={cn(
-              "px-6 py-2 rounded-xl font-semibold transition-all shadow-sm",
-              canteen?.isAcceptingOrders ? "bg-red-600 text-white hover:bg-red-700" : "bg-emerald-600 text-white hover:bg-emerald-700"
-            )}
-          >
-            {canteen?.isAcceptingOrders ? 'PANIC: Stop Orders' : 'Start Accepting Orders'}
-          </button>
+          <div className="flex items-center gap-4 bg-zinc-900 p-3 rounded-2xl border border-zinc-800">
+            <div className="flex flex-col text-right">
+              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Store Status</span>
+              <span className={cn("text-xs font-bold", canteen?.isAcceptingOrders ? "text-emerald-500" : "text-red-500")}>
+                {canteen?.isAcceptingOrders ? 'Accepting Orders' : 'Closed to Orders'}
+              </span>
+            </div>
+            <button
+              onClick={async () => {
+                const supabase = getSupabase();
+                if (!supabase) return;
+                const newState = !canteen?.isAcceptingOrders;
+                await supabase.from('canteens').update({ is_accepting_orders: newState }).eq('id', canteen!.id);
+                showToast(newState ? "Store is now OPEN" : "Store is now CLOSED to all orders", newState ? "success" : "info");
+              }}
+              className={cn(
+                "relative w-14 h-8 rounded-full transition-colors duration-300 focus:outline-none",
+                canteen?.isAcceptingOrders ? "bg-emerald-600" : "bg-zinc-700"
+              )}
+            >
+              <motion.div
+                animate={{ x: canteen?.isAcceptingOrders ? 28 : 4 }}
+                className="absolute top-1 left-0 w-6 h-6 bg-white rounded-full shadow-lg"
+              />
+            </button>
+          </div>
         </div>
       </header>
 
