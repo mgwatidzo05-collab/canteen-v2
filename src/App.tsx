@@ -1374,8 +1374,8 @@ const CartContent = () => {
           <CheckCircle size={48} />
         </div>
         <div>
-          <h3 className="text-2xl font-bold text-white">Order Confirmed!</h3>
-          <p className="text-zinc-400 mt-2">Your order #{orderSuccess} has been sent.</p>
+          <h3 className="text-2xl font-bold text-white">Order Sent!</h3>
+          <p className="text-zinc-400 mt-2">Your order has been sent to the canteen. Please wait for them to accept it.</p>
         </div>
         <div className="pt-4 space-y-3">
           <Link to="/orders" onClick={() => setIsCartOpen(false)} className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-500 transition-all block">
@@ -1739,6 +1739,7 @@ const ReviewButton = ({ order }: { order: Order }) => {
 const PaymentForm = ({ order, onPaid }: { order: Order; onPaid: () => void }) => {
   const [paymentType, setPaymentType] = useState<'code' | 'screenshot'>('code');
   const [paymentProof, setPaymentProof] = useState('');
+  const [senderName, setSenderName] = useState(order.customerName || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [canteen, setCanteen] = useState<Canteen | null>(null);
   const { showToast } = useToast();
@@ -1766,6 +1767,7 @@ const PaymentForm = ({ order, onPaid }: { order: Order; onPaid: () => void }) =>
       const { error } = await supabase.from('orders').update({
         payment_proof: paymentProof.trim(),
         payment_type: paymentType,
+        sender_name: senderName.trim(),
         status: 'paid' // Set to paid for owner verification
       }).eq('id', order.id);
 
@@ -1821,20 +1823,36 @@ const PaymentForm = ({ order, onPaid }: { order: Order; onPaid: () => void }) =>
         </button>
       </div>
 
-      <div className="space-y-1.5">
-        <input
-          type="text"
-          value={paymentProof}
-          onChange={(e) => setPaymentProof(e.target.value)}
-          placeholder={paymentType === 'code' ? "Enter EcoCash Code" : "Enter payment details"}
-          className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-100 outline-none focus:border-emerald-500 transition-all"
-        />
+      <div className="space-y-3">
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-bold text-zinc-500 uppercase ml-1">EcoCash Sender Name</label>
+          <input
+            type="text"
+            value={senderName}
+            onChange={(e) => setSenderName(e.target.value)}
+            placeholder="Who is sending the money?"
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-100 outline-none focus:border-emerald-500 transition-all"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-bold text-zinc-500 uppercase ml-1">
+            {paymentType === 'code' ? 'EcoCash Code' : 'Payment Proof'}
+          </label>
+          <input
+            type="text"
+            value={paymentProof}
+            onChange={(e) => setPaymentProof(e.target.value)}
+            placeholder={paymentType === 'code' ? "Enter EcoCash Code" : "Enter payment details"}
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-100 outline-none focus:border-emerald-500 transition-all"
+          />
+        </div>
       </div>
 
       <button
         onClick={handleSubmit}
-        disabled={isSubmitting || !paymentProof.trim()}
-        className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-3 rounded-xl font-bold text-sm transition-all"
+        disabled={isSubmitting || !paymentProof.trim() || !senderName.trim()}
+        className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-3 rounded-xl font-bold text-sm transition-all shadow-lg shadow-emerald-600/20"
       >
         {isSubmitting ? "Submitting..." : "Confirm Payment"}
       </button>
@@ -1909,6 +1927,7 @@ const MyOrders = () => {
           status: d.status,
           paymentProof: d.payment_proof,
           paymentType: d.payment_type,
+          senderName: d.sender_name,
           createdAt: d.created_at
         } as Order)));
       }
@@ -2941,6 +2960,7 @@ const OwnerPortal = () => {
         status: d.status,
         paymentProof: d.payment_proof,
         paymentType: d.payment_type,
+        senderName: d.sender_name,
         createdAt: d.created_at
       } as Order));
 
@@ -3184,6 +3204,9 @@ const OwnerPortal = () => {
                         <h4 className="text-lg font-black text-zinc-100 group-hover:text-emerald-500 transition-colors">
                           {order.customerName || 'Anonymous'}
                         </h4>
+                        {order.senderName && order.senderName !== order.customerName && (
+                          <p className="text-[10px] text-zinc-500 italic font-bold">Sender: {order.senderName}</p>
+                        )}
                       </div>
                       <div className={cn(
                         "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border",

@@ -50,6 +50,7 @@ export interface Order {
   status: OrderStatus;
   paymentProof?: string;
   paymentType?: 'code' | 'screenshot';
+  senderName?: string;
   createdAt: string;
 }
 
