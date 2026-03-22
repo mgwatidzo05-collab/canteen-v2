@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, Component, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, Component, useCallback, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useParams, useNavigate } from 'react-router-dom';
 import { User } from '@supabase/supabase-js';
 import { getSupabase, isSupabaseConfigured } from './supabase';
@@ -68,6 +68,49 @@ class ErrorBoundary extends Component<any, any> {
 }
 
 const AuthContext = createContext<any>(null);
+const ToastContext = createContext<any>(null);
+
+export const useToast = () => useContext(ToastContext);
+
+const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [toasts, setToasts] = useState<{ id: string; message: string; type: 'success' | 'error' | 'info' }[]>([]);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    const id = Math.random().toString(36).substr(2, 9);
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 5000);
+  };
+
+  return (
+    <ToastContext.Provider value={{ showToast }}>
+      {children}
+      <div className="fixed top-4 right-4 z-[200] flex flex-col gap-2 pointer-events-none">
+        <AnimatePresence>
+          {toasts.map(toast => (
+            <motion.div
+              key={toast.id}
+              initial={{ x: 100, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: 100, opacity: 0 }}
+              className={cn(
+                "px-6 py-4 rounded-2xl shadow-2xl border flex items-center gap-3 pointer-events-auto min-w-[300px]",
+                toast.type === 'success' ? "bg-emerald-950 border-emerald-500/30 text-emerald-400" :
+                toast.type === 'error' ? "bg-red-950 border-red-500/30 text-red-400" :
+                "bg-zinc-900 border-zinc-700 text-zinc-300"
+              )}
+            >
+              {toast.type === 'success' && <CheckCircle size={20} />}
+              {toast.type === 'error' && <AlertCircle size={20} />}
+              <p className="text-sm font-bold">{toast.message}</p>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+    </ToastContext.Provider>
+  );
+};
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -150,12 +193,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (!error && data) {
       let phone = data.phone;
+      let email = data.email;
+      let updates: any = {};
       
-      // If phone is missing in profile, try to extract from email
+      // Sync phone from email if missing
       if (!phone && currentUser?.email?.endsWith('@canteenconnect.com')) {
         phone = currentUser.email.split('@')[0];
-        // Update profile with extracted phone
-        await supabase.from('profiles').update({ phone }).eq('id', uid);
+        updates.phone = phone;
+      }
+
+      // Sync email if missing
+      if (!email && currentUser?.email) {
+        email = currentUser.email;
+        updates.email = email;
+      }
+
+      // Always update last_seen on login/profile fetch
+      const now = new Date().toISOString();
+      updates.last_seen = now;
+
+      if (Object.keys(updates).length > 0) {
+        await supabase.from('profiles').update(updates).eq('id', uid);
       }
 
       setProfile({
@@ -164,7 +222,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         role: data.role as UserRole,
         canteenId: data.canteen_id,
         phone: phone,
-        lastSeen: data.last_seen
+        lastSeen: now // Use the fresh timestamp
       });
     }
     setLoading(false);
@@ -499,6 +557,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isCartOpen, setIsCartOpen] = useState(false);
 
   const addToCart = (item: MenuItem) => {
+    const { showToast } = useToast();
     setCart(prev => {
       // Enforce single canteen cart
       if (prev.length > 0 && prev[0].canteenId !== item.canteenId) {
@@ -510,11 +569,14 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const existing = prev.find(i => i.id === item.id);
       if (existing) {
+        showToast(`Increased ${item.name} quantity`, 'success');
         return prev.map(i => i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i);
       }
+      showToast(`Added ${item.name} to cart`, 'success');
       return [...prev, { ...item, quantity: 1 }];
     });
-    setIsCartOpen(true);
+    // Don't open cart automatically anymore
+    // setIsCartOpen(true);
   };
 
   const updateQuantity = (itemId: string, delta: number) => {
@@ -631,6 +693,152 @@ const InstallPrompt = () => {
   );
 };
 
+const GlobalOrderListener = () => {
+  const { user, profile } = useAuth();
+  const { showToast } = useToast();
+  const prevOrdersRef = useRef<Record<string, OrderStatus>>({});
+  const [activeNotification, setActiveNotification] = useState<{ orderId: string; status: OrderStatus; customerName: string } | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    const supabase = getSupabase();
+    if (!supabase) return;
+
+    const fetchInitialOrders = async () => {
+      const { data } = await supabase
+        .from('orders')
+        .select('id, status')
+        .eq('customer_id', user.id);
+      
+      if (data) {
+        const initialMap: Record<string, OrderStatus> = {};
+        data.forEach(o => {
+          initialMap[o.id] = o.status;
+        });
+        prevOrdersRef.current = initialMap;
+      }
+    };
+
+    fetchInitialOrders();
+
+    const channel = supabase
+      .channel(`user-orders-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'orders',
+          filter: `customer_id=eq.${user.id}`
+        },
+        (payload) => {
+          const newOrder = payload.new as any;
+          if (!newOrder) return;
+
+          const orderId = newOrder.id.toString();
+          const newStatus = newOrder.status as OrderStatus;
+          const oldStatus = prevOrdersRef.current[orderId];
+
+          if (oldStatus && oldStatus !== newStatus) {
+            showToast(`Order #${orderId.slice(-4)} is now ${newStatus}!`, 'info');
+            setActiveNotification({
+              orderId,
+              status: newStatus,
+              customerName: newOrder.customer_name || 'Customer'
+            });
+          }
+          
+          prevOrdersRef.current[orderId] = newStatus;
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
+
+  return (
+    <AnimatePresence>
+      {activeNotification && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.9, y: 20 }}
+          className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+        >
+          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-[2.5rem] max-w-sm w-full shadow-2xl text-center space-y-6">
+            <div className={cn(
+              "w-20 h-20 rounded-3xl flex items-center justify-center mx-auto",
+              activeNotification.status === 'accepted' ? "bg-blue-500/20 text-blue-500" :
+              activeNotification.status === 'ready' ? "bg-emerald-500/20 text-emerald-500" :
+              activeNotification.status === 'paid' ? "bg-purple-500/20 text-purple-500" :
+              "bg-zinc-800 text-zinc-400"
+            )}>
+              {activeNotification.status === 'ready' ? <CheckCircle size={40} /> : <ShoppingBag size={40} />}
+            </div>
+            
+            <div>
+              <h3 className="text-2xl font-black text-zinc-100">Order Update!</h3>
+              <p className="text-zinc-400 mt-2">
+                Hey <span className="text-zinc-100 font-bold">{activeNotification.customerName}</span>, your order <span className="text-emerald-500 font-mono">#{activeNotification.orderId.slice(-4)}</span> is now:
+              </p>
+              <div className={cn(
+                "mt-4 inline-block px-6 py-2 rounded-full text-xs font-black uppercase tracking-widest border",
+                activeNotification.status === 'accepted' && "bg-blue-500/10 text-blue-500 border-blue-500/20",
+                activeNotification.status === 'paid' && "bg-purple-500/10 text-purple-500 border-purple-500/20",
+                activeNotification.status === 'ready' && "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
+                activeNotification.status === 'preparing' && "bg-indigo-500/10 text-indigo-500 border-indigo-500/20",
+              )}>
+                {activeNotification.status}
+              </div>
+
+              <div className="mt-6 space-y-2">
+                <div className="flex justify-between items-center">
+                  <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Live Progress</p>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Live</span>
+                  </div>
+                </div>
+                <div className="relative h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ 
+                      width: activeNotification.status === 'pending' ? '15%' : 
+                             activeNotification.status === 'accepted' ? '30%' : 
+                             activeNotification.status === 'paid' ? '45%' :
+                             activeNotification.status === 'preparing' ? '60%' : 
+                             activeNotification.status === 'ready' ? '80%' : '100%' 
+                    }}
+                    className="absolute inset-y-0 left-0 bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.3)]"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-4 flex flex-col gap-3">
+              <Link
+                to="/orders"
+                onClick={() => setActiveNotification(null)}
+                className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-600/20"
+              >
+                Track Live Progress
+              </Link>
+              <button
+                onClick={() => setActiveNotification(null)}
+                className="text-zinc-500 text-sm font-bold hover:text-zinc-300"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+};
+
 const MainLayout = ({ children }: { children: React.ReactNode }) => {
   const { isCartOpen, setIsCartOpen, cart } = useCart();
   const cartItemCount = cart.reduce((acc, curr) => acc + curr.quantity, 0);
@@ -638,6 +846,7 @@ const MainLayout = ({ children }: { children: React.ReactNode }) => {
   return (
     <div className="min-h-screen bg-zinc-950">
       <Navbar />
+      <GlobalOrderListener />
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {children}
       </main>
@@ -678,11 +887,12 @@ const MainLayout = ({ children }: { children: React.ReactNode }) => {
 export default function App() {
   return (
     <ErrorBoundary>
-      <AuthProvider>
-        <CartProvider>
-          <Router>
-            <MainLayout>
-              <Routes>
+      <ToastProvider>
+        <AuthProvider>
+          <CartProvider>
+            <Router>
+              <MainLayout>
+                <Routes>
                 <Route path="/" element={<ExploreCanteens />} />
                 <Route path="/explore" element={<ExploreCanteens />} />
                 <Route path="/canteen/:id" element={<CanteenDetails />} />
@@ -696,7 +906,8 @@ export default function App() {
           </Router>
         </CartProvider>
       </AuthProvider>
-    </ErrorBoundary>
+    </ToastProvider>
+  </ErrorBoundary>
   );
 }
 
@@ -1064,15 +1275,17 @@ const CanteenDetails = () => {
 };
 
 const CartContent = () => {
-  const { cart, total, removeFromCart, updateQuantity, clearCart, setIsCartOpen } = useCart();
+  const { cart, total: subtotal, removeFromCart, updateQuantity, clearCart, setIsCartOpen } = useCart();
   const { user, profile } = useAuth();
+  const { showToast } = useToast();
   const [canteen, setCanteen] = useState<Canteen | null>(null);
   const [customerName, setCustomerName] = useState(profile?.username || user?.email?.split('@')[0] || '');
-  const [paymentType, setPaymentType] = useState<'code' | 'screenshot'>('code');
-  const [paymentProof, setPaymentProof] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const cents = canteen?.ecoCashCents || 0;
+  const total = subtotal + cents;
 
   useEffect(() => {
     if (cart.length > 0) {
@@ -1106,7 +1319,6 @@ const CartContent = () => {
     setError(null);
     if (!canteen) return setError("Canteen info not loaded.");
     if (!customerName.trim()) return setError("Please enter your name.");
-    if (!paymentProof.trim()) return setError(`Please enter the ${paymentType === 'code' ? 'EcoCash transaction code' : 'screenshot details'}.`);
     
     const supabase = getSupabase();
     if (!supabase) return setError("Database connection failed.");
@@ -1121,14 +1333,14 @@ const CartContent = () => {
         canteen_id: canteen.id,
         items: cart,
         total: Number(total.toFixed(2)),
+        cents_added: cents,
         status: 'pending',
-        payment_proof: paymentProof.trim(),
-        payment_type: paymentType,
       }).select().single();
 
       if (insertError) throw insertError;
 
       const orderId = insertedData.id.toString();
+      showToast("Order sent! Waiting for canteen to accept.", "success");
 
       // Track orders for the current user
       const userOrders = JSON.parse(localStorage.getItem(`orders_${customerId}`) || '[]');
@@ -1209,27 +1421,38 @@ const CartContent = () => {
           ))}
         </div>
 
-        {/* Payment Info */}
-        {canteen && (
-          <div className="bg-emerald-500/5 border border-emerald-500/10 p-4 rounded-2xl space-y-3">
+        {/* Order Summary */}
+        <div className="bg-zinc-800/30 border border-zinc-800 p-6 rounded-[2rem] space-y-4">
+          <div className="flex justify-between items-center">
+            <span className="text-zinc-500 font-medium">Subtotal</span>
+            <span className="text-zinc-100 font-bold">${subtotal.toFixed(2)}</span>
+          </div>
+          {cents > 0 && (
             <div className="flex justify-between items-center">
-              <span className="text-[10px] font-bold text-emerald-500/60 uppercase tracking-widest">Payment to {canteen.name}</span>
-              <span className="text-xs font-mono text-emerald-500">{canteen.ecoCashNumber}</span>
+              <span className="text-zinc-500 font-medium">EcoCash Fee (Cents)</span>
+              <span className="text-emerald-500 font-bold">+${cents.toFixed(2)}</span>
             </div>
-            <div className="flex justify-between items-end">
-              <div>
-                <p className="text-[10px] text-zinc-500 uppercase font-bold">Total Amount</p>
-                <p className="text-xl font-black text-zinc-100">${total.toFixed(2)}</p>
-              </div>
-              {canteen.ecoCashRate && (
-                <div className="text-right">
-                  <p className="text-[10px] text-zinc-500 uppercase font-bold">RTGS (1:{canteen.ecoCashRate})</p>
-                  <p className="text-sm font-bold text-emerald-500">{(total * canteen.ecoCashRate).toFixed(2)}</p>
-                </div>
+          )}
+          <div className="pt-4 border-t border-zinc-800 flex justify-between items-center">
+            <span className="text-zinc-100 font-black text-lg">Total</span>
+            <div className="text-right">
+              <span className="text-zinc-100 font-black text-2xl">${total.toFixed(2)}</span>
+              {canteen?.ecoCashRate && (
+                <p className="text-xs text-emerald-500 font-mono mt-1">
+                  RTGS {(total * canteen.ecoCashRate).toFixed(2)}
+                </p>
               )}
             </div>
           </div>
-        )}
+        </div>
+
+        {/* Info Box */}
+        <div className="bg-blue-500/10 border border-blue-500/20 p-4 rounded-2xl flex gap-3">
+          <AlertCircle className="text-blue-500 shrink-0" size={20} />
+          <p className="text-xs text-blue-200 leading-relaxed">
+            Your order will be sent to the canteen for review. Once they <strong>accept</strong> it, you will be notified to provide payment details.
+          </p>
+        </div>
 
         {/* Form */}
         <div className="space-y-4">
@@ -1241,21 +1464,6 @@ const CartContent = () => {
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
               className="w-full bg-zinc-800 border border-zinc-700 rounded-xl py-3 px-4 text-sm text-white outline-none focus:border-emerald-500 transition-colors"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-zinc-500 uppercase ml-1">Payment Method</label>
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => setPaymentType('code')} className={cn("py-2.5 rounded-xl text-[10px] font-bold border transition-all uppercase tracking-widest", paymentType === 'code' ? "bg-emerald-600 text-white border-emerald-600" : "bg-zinc-800 text-zinc-500 border-zinc-700")}>EcoCash Code</button>
-              <button onClick={() => setPaymentType('screenshot')} className={cn("py-2.5 rounded-xl text-[10px] font-bold border transition-all uppercase tracking-widest", paymentType === 'screenshot' ? "bg-emerald-600 text-white border-emerald-600" : "bg-zinc-800 text-zinc-500 border-zinc-700")}>Screenshot</button>
-            </div>
-            <input
-              type="text"
-              placeholder={paymentType === 'code' ? "Enter EcoCash transaction code" : "Paste screenshot link or ID"}
-              value={paymentProof}
-              onChange={(e) => setPaymentProof(e.target.value)}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-xl py-3 px-4 text-sm text-white outline-none focus:border-emerald-500 transition-colors mt-2"
             />
           </div>
         </div>
@@ -1305,12 +1513,12 @@ const CartContent = () => {
 const CartDrawer = ({ onClose }: { onClose: () => void }) => {
   const { cart, clearCart } = useCart();
   return (
-    <div className="fixed inset-0 z-[100] flex justify-end items-end sm:items-start p-4 pointer-events-none">
+    <div className="fixed inset-0 z-[100] flex justify-center items-end p-4 pointer-events-none">
       <motion.div
         initial={{ y: 100, opacity: 0, scale: 0.95 }}
         animate={{ y: 0, opacity: 1, scale: 1 }}
         exit={{ y: 100, opacity: 0, scale: 0.95 }}
-        className="w-full sm:max-w-md bg-zinc-900 shadow-2xl rounded-[2rem] sm:rounded-[2.5rem] flex flex-col border border-zinc-800 pointer-events-auto max-h-[80vh] sm:max-h-[85vh] overflow-hidden"
+        className="w-full max-w-lg bg-zinc-900 shadow-2xl rounded-[2.5rem] flex flex-col border border-zinc-800 pointer-events-auto max-h-[70vh] overflow-hidden mb-4"
       >
         <div className="p-4 sm:p-6 border-b border-zinc-800 flex justify-between items-center bg-zinc-900/80 backdrop-blur-md sticky top-0 z-10">
           <div className="flex items-center gap-3">
@@ -1531,6 +1739,112 @@ const ReviewButton = ({ order }: { order: Order }) => {
   );
 };
 
+const PaymentForm = ({ order, onPaid }: { order: Order; onPaid: () => void }) => {
+  const [paymentType, setPaymentType] = useState<'code' | 'screenshot'>('code');
+  const [paymentProof, setPaymentProof] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [canteen, setCanteen] = useState<Canteen | null>(null);
+  const { showToast } = useToast();
+
+  useEffect(() => {
+    const supabase = getSupabase();
+    if (!supabase) return;
+    supabase.from('canteens').select('*').eq('id', order.canteenId).single().then(({ data }) => {
+      if (data) setCanteen({
+        id: data.id,
+        name: data.name,
+        ecoCashNumber: data.ecocash_number,
+        ecoCashRate: data.ecocash_rate,
+      } as any);
+    });
+  }, [order.canteenId]);
+
+  const handleSubmit = async () => {
+    if (!paymentProof.trim()) return;
+    setIsSubmitting(true);
+    const supabase = getSupabase();
+    if (!supabase) return;
+
+    try {
+      const { error } = await supabase.from('orders').update({
+        payment_proof: paymentProof.trim(),
+        payment_type: paymentType,
+        status: 'paid' // Set to paid for owner verification
+      }).eq('id', order.id);
+
+      if (error) throw error;
+      showToast("Payment submitted! Canteen will verify.", "success");
+      onPaid();
+    } catch (err: any) {
+      showToast(err.message, "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {canteen && (
+        <div className="bg-zinc-900/50 p-4 rounded-xl border border-zinc-800 space-y-2">
+          <div className="flex justify-between items-center">
+            <span className="text-[10px] font-bold text-zinc-500 uppercase">EcoCash Number</span>
+            <span className="text-sm font-mono text-emerald-500">{canteen.ecoCashNumber}</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-[10px] font-bold text-zinc-500 uppercase">Amount Due</span>
+            <span className="text-sm font-bold text-zinc-100">${order.total.toFixed(2)}</span>
+          </div>
+          {canteen.ecoCashRate && (
+            <div className="flex justify-between items-center">
+              <span className="text-[10px] font-bold text-zinc-500 uppercase">RTGS Equivalent</span>
+              <span className="text-sm font-bold text-emerald-500">{(order.total * canteen.ecoCashRate).toFixed(2)}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          onClick={() => setPaymentType('code')}
+          className={cn(
+            "py-2 rounded-xl text-[10px] font-bold border transition-all",
+            paymentType === 'code' ? "bg-emerald-500/10 border-emerald-500 text-emerald-500" : "bg-zinc-800 border-zinc-700 text-zinc-500"
+          )}
+        >
+          EcoCash Code
+        </button>
+        <button
+          onClick={() => setPaymentType('screenshot')}
+          className={cn(
+            "py-2 rounded-xl text-[10px] font-bold border transition-all",
+            paymentType === 'screenshot' ? "bg-emerald-500/10 border-emerald-500 text-emerald-500" : "bg-zinc-800 border-zinc-700 text-zinc-500"
+          )}
+        >
+          Screenshot
+        </button>
+      </div>
+
+      <div className="space-y-1.5">
+        <input
+          type="text"
+          value={paymentProof}
+          onChange={(e) => setPaymentProof(e.target.value)}
+          placeholder={paymentType === 'code' ? "Enter EcoCash Code" : "Enter payment details"}
+          className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-100 outline-none focus:border-emerald-500 transition-all"
+        />
+      </div>
+
+      <button
+        onClick={handleSubmit}
+        disabled={isSubmitting || !paymentProof.trim()}
+        className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-3 rounded-xl font-bold text-sm transition-all"
+      >
+        {isSubmitting ? "Submitting..." : "Confirm Payment"}
+      </button>
+    </div>
+  );
+};
+
 const MyOrders = () => {
   const { user, profile, loading: authLoading } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -1594,6 +1908,7 @@ const MyOrders = () => {
           canteenId: d.canteen_id,
           items: d.items,
           total: d.total,
+          centsAdded: d.cents_added,
           status: d.status,
           paymentProof: d.payment_proof,
           paymentType: d.payment_type,
@@ -1661,7 +1976,9 @@ const MyOrders = () => {
               <div className={cn(
                 "px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest",
                 order.status === 'pending' && "bg-amber-500/10 text-amber-500 border border-amber-500/20",
-                order.status === 'preparing' && "bg-blue-500/10 text-blue-500 border border-blue-500/20",
+                order.status === 'accepted' && "bg-blue-500/10 text-blue-500 border border-blue-500/20",
+                order.status === 'paid' && "bg-purple-500/10 text-purple-500 border border-purple-500/20",
+                order.status === 'preparing' && "bg-indigo-500/10 text-indigo-500 border border-indigo-500/20",
                 order.status === 'ready' && "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20",
                 order.status === 'collected' && "bg-zinc-800 text-zinc-400 border border-zinc-700",
                 order.status === 'cancelled' && "bg-red-500/10 text-red-500 border border-red-500/20",
@@ -1684,22 +2001,54 @@ const MyOrders = () => {
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Payment</p>
-                  <p className="text-xs text-zinc-300 capitalize">{order.paymentType} • {order.paymentProof.slice(0, 8)}...</p>
+                  {order.paymentProof ? (
+                    <p className="text-xs text-zinc-300 capitalize">{order.paymentType} • {order.paymentProof.slice(0, 8)}...</p>
+                  ) : (
+                    <p className="text-xs text-amber-500 font-bold">Awaiting Payment</p>
+                  )}
                 </div>
               </div>
             </div>
 
+            {order.status === 'accepted' && !order.paymentProof && (
+              <div className="mt-4 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl space-y-4 relative z-10">
+                <div className="flex items-center gap-3 text-emerald-500">
+                  <CheckCircle size={20} />
+                  <p className="text-sm font-bold">Order Accepted! Please Pay Now</p>
+                </div>
+                <PaymentForm order={order} onPaid={() => {}} />
+              </div>
+            )}
+
+            {order.status === 'paid' && (
+              <div className="mt-4 p-4 bg-purple-500/10 border border-purple-500/20 rounded-2xl flex items-center gap-3 text-purple-500 relative z-10">
+                <Loader2 className="animate-spin" size={20} />
+                <p className="text-sm font-bold">Payment submitted. Canteen is verifying...</p>
+              </div>
+            )}
+
             {order.status !== 'collected' && order.status !== 'cancelled' && (
-              <div className="relative h-1.5 bg-zinc-800 rounded-full overflow-hidden mt-4">
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ 
-                    width: order.status === 'pending' ? '25%' : 
-                           order.status === 'preparing' ? '50%' : 
-                           order.status === 'ready' ? '75%' : '100%' 
-                  }}
-                  className="absolute inset-y-0 left-0 bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)]"
-                />
+              <div className="mt-4 space-y-2">
+                <div className="flex justify-between items-center">
+                  <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Live Tracker</p>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Live</span>
+                  </div>
+                </div>
+                <div className="relative h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ 
+                      width: order.status === 'pending' ? '15%' : 
+                             order.status === 'accepted' ? '30%' : 
+                             order.status === 'paid' ? '45%' :
+                             order.status === 'preparing' ? '60%' : 
+                             order.status === 'ready' ? '80%' : '100%' 
+                    }}
+                    className="absolute inset-y-0 left-0 bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)]"
+                  />
+                </div>
               </div>
             )}
 
@@ -2004,7 +2353,7 @@ const AdminPortal = () => {
       fetchCanteens();
       fetchUsers();
       setNow(new Date());
-    }, 30000); // Poll every 30 seconds
+    }, 10000); // Poll every 10 seconds for more responsive updates
 
     return () => {
       supabase.removeChannel(canteensChannel);
@@ -2413,9 +2762,18 @@ const AdminPortal = () => {
           ) : activeTab === 'users' ? (
             <div className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800 shadow-sm">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-                <div>
-                  <h3 className="text-lg font-semibold text-zinc-100">Registered Users ({users.length})</h3>
-                  <p className="text-xs text-zinc-500">Total accounts in the system</p>
+                <div className="flex items-center gap-4">
+                  <div>
+                    <h3 className="text-lg font-semibold text-zinc-100">Registered Users ({users.length})</h3>
+                    <p className="text-xs text-zinc-500">Total accounts in the system</p>
+                  </div>
+                  <button 
+                    onClick={() => { fetchUsers(); setNow(new Date()); }}
+                    className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded-xl transition-colors border border-zinc-700"
+                    title="Refresh List"
+                  >
+                    <Plus className="rotate-45" size={18} />
+                  </button>
                 </div>
                 
                 <div className="relative flex-1 max-w-md">
@@ -2510,7 +2868,9 @@ const OwnerPortal = () => {
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [newItem, setNewItem] = useState({ name: '', price: '', description: '', imageUrl: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [activeTab, setActiveTab] = useState<'pending' | 'preparing' | 'ready' | 'collected' | 'cancelled'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'accepted' | 'paid' | 'preparing' | 'ready' | 'collected' | 'cancelled'>('pending');
+  const { showToast } = useToast();
+  const prevOrdersRef = useRef<Order[]>([]);
 
   const fetchCanteenData = async (canteenId: string) => {
     const supabase = getSupabase();
@@ -2566,19 +2926,34 @@ const OwnerPortal = () => {
       .eq('canteen_id', canteenId)
       .order('created_at', { ascending: false });
 
-    if (!orderError && orderData) {
-      setOrders(orderData.map(d => ({
+    if (orderData) {
+      const newOrders = orderData.map(d => ({
         id: d.id.toString(),
         customerId: d.customer_id,
         customerName: d.customer_name,
         canteenId: d.canteen_id,
         items: d.items,
         total: d.total,
+        centsAdded: d.cents_added,
         status: d.status,
         paymentProof: d.payment_proof,
         paymentType: d.payment_type,
         createdAt: d.created_at
-      } as Order)));
+      } as Order));
+
+      // Check for new orders to show toast
+      if (prevOrdersRef.current.length > 0) {
+        newOrders.forEach(order => {
+          const prev = prevOrdersRef.current.find(o => o.id === order.id);
+          if (!prev) {
+            showToast(`New order from ${order.customerName}!`, 'info');
+          } else if (prev.status !== order.status) {
+            // showToast(`Order #${order.id.slice(-4)} status: ${order.status}`, 'info');
+          }
+        });
+      }
+      prevOrdersRef.current = newOrders;
+      setOrders(newOrders);
     }
   };
 
@@ -2765,7 +3140,7 @@ const OwnerPortal = () => {
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
               <h3 className="text-xl font-bold text-zinc-100">Order Management</h3>
               <div className="flex flex-wrap gap-2 bg-zinc-800/50 p-1 rounded-2xl border border-zinc-800">
-                {(['pending', 'preparing', 'ready', 'collected', 'cancelled'] as const).map((tab) => (
+                {(['pending', 'accepted', 'paid', 'preparing', 'ready', 'collected', 'cancelled'] as const).map((tab) => (
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
@@ -2797,7 +3172,9 @@ const OwnerPortal = () => {
                       <div className={cn(
                         "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border",
                         order.status === 'pending' && "bg-amber-500/10 text-amber-500 border-amber-500/20",
-                        order.status === 'preparing' && "bg-blue-500/10 text-blue-500 border-blue-500/20",
+                        order.status === 'accepted' && "bg-blue-500/10 text-blue-500 border-blue-500/20",
+                        order.status === 'paid' && "bg-purple-500/10 text-purple-500 border-purple-500/20",
+                        order.status === 'preparing' && "bg-indigo-500/10 text-indigo-500 border-indigo-500/20",
                         order.status === 'ready' && "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
                       )}>
                         {order.status}
@@ -2820,11 +3197,15 @@ const OwnerPortal = () => {
                         onChange={async (e) => {
                           const supabase = getSupabase();
                           if (!supabase) return;
-                          await supabase.from('orders').update({ status: e.target.value }).eq('id', order.id);
+                          const newStatus = e.target.value;
+                          await supabase.from('orders').update({ status: newStatus }).eq('id', order.id);
+                          showToast(`Order #${order.id.slice(-4)} updated to ${newStatus}`, 'success');
                         }}
                         className="px-3 py-1.5 rounded-xl border border-zinc-700 bg-zinc-900 text-zinc-100 text-xs font-bold outline-none focus:border-emerald-500 transition-colors cursor-pointer"
                       >
                         <option value="pending">Pending</option>
+                        <option value="accepted">Accepted</option>
+                        <option value="paid">Paid (Verify)</option>
                         <option value="preparing">Preparing</option>
                         <option value="ready">Ready</option>
                         <option value="collected">Collected</option>

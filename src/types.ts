@@ -37,7 +37,7 @@ export interface MenuItem {
   imageUrl?: string;
 }
 
-export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'collected' | 'cancelled';
+export type OrderStatus = 'pending' | 'accepted' | 'paid' | 'preparing' | 'ready' | 'collected' | 'cancelled';
 
 export interface Order {
   id: string;
@@ -46,6 +46,7 @@ export interface Order {
   canteenId: string;
   items: CartItem[];
   total: number;
+  centsAdded?: number;
   status: OrderStatus;
   paymentProof?: string;
   paymentType?: 'code' | 'screenshot';

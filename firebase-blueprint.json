@@ -23,6 +23,7 @@
         "status": { "type": "string", "enum": ["active", "frozen"] },
         "ecoCashNumber": { "type": "string" },
         "ecoCashRate": { "type": "number" },
+        "ecoCashCents": { "type": "number" },
         "address": { "type": "string" },
         "notice": { "type": "string" },
         "isAcceptingOrders": { "type": "boolean" },
@@ -53,7 +54,8 @@
         "canteenId": { "type": "string" },
         "items": { "type": "array", "items": { "type": "object" } },
         "total": { "type": "number" },
-        "status": { "type": "string", "enum": ["pending", "preparing", "ready", "collected", "cancelled"] },
+        "centsAdded": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "preparing", "ready", "collected", "cancelled"] },
         "paymentProof": { "type": "string" },
         "paymentType": { "type": "string", "enum": ["code", "screenshot"] },
         "createdAt": { "type": "string", "format": "date-time" }
