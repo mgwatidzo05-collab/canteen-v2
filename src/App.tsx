@@ -1437,22 +1437,9 @@ const CartContent = () => {
             <span className="text-zinc-500 font-medium">Subtotal</span>
             <span className="text-zinc-100 font-bold">${subtotal.toFixed(2)}</span>
           </div>
-          {cents > 0 && (
-            <div className="flex justify-between items-center">
-              <span className="text-zinc-500 font-medium">EcoCash Fee (Cents)</span>
-              <span className="text-emerald-500 font-bold">+${cents.toFixed(2)}</span>
-            </div>
-          )}
           <div className="pt-4 border-t border-zinc-800 flex justify-between items-center">
             <span className="text-zinc-100 font-black text-lg">Total</span>
-            <div className="text-right">
-              <span className="text-zinc-100 font-black text-2xl">${total.toFixed(2)}</span>
-              {canteen?.ecoCashRate && (
-                <p className="text-xs text-emerald-500 font-mono mt-1">
-                  RTGS {(total * canteen.ecoCashRate).toFixed(2)}
-                </p>
-              )}
-            </div>
+            <span className="text-zinc-100 font-black text-2xl">${subtotal.toFixed(2)}</span>
           </div>
         </div>
 
@@ -1509,7 +1496,7 @@ const CartContent = () => {
           ) : (
             <CheckCircle size={20} />
           )}
-          {isSubmitting ? 'Processing...' : !user ? 'Sign In to Order' : 'Confirm & Place Order'}
+          {isSubmitting ? 'Sending...' : !user ? 'Sign In to Order' : 'Send Order'}
         </button>
         
         <p className="text-[10px] text-center text-zinc-500">
@@ -2006,12 +1993,18 @@ const MyOrders = () => {
               ))}
               <div className="pt-4 mt-4 border-t border-zinc-800 flex justify-between items-end">
                 <div>
-                  <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Total Amount</p>
-                  <p className="text-2xl font-black text-emerald-500">${order.total.toFixed(2)}</p>
+                  <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                    {order.status === 'pending' ? 'Estimated Total' : 'Final Total'}
+                  </p>
+                  <p className="text-2xl font-black text-emerald-500">
+                    ${(order.status === 'pending' ? (order.total - (order.centsAdded || 0)) : order.total).toFixed(2)}
+                  </p>
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Payment</p>
-                  {order.paymentProof ? (
+                  {order.status === 'pending' ? (
+                    <p className="text-xs text-zinc-500 italic">Visible after acceptance</p>
+                  ) : order.paymentProof ? (
                     <p className="text-xs text-zinc-300 capitalize">{order.paymentType} • {order.paymentProof.slice(0, 8)}...</p>
                   ) : (
                     <p className="text-xs text-amber-500 font-bold">Awaiting Payment</p>
