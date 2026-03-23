@@ -555,16 +555,17 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const { showToast } = useToast();
 
   const addToCart = (item: MenuItem) => {
-    const { showToast } = useToast();
     setCart(prev => {
       // Enforce single canteen cart
       if (prev.length > 0 && prev[0].canteenId !== item.canteenId) {
-        if (window.confirm("Adding this item will clear your current cart from another canteen. Continue?")) {
-          return [{ ...item, quantity: 1 }];
-        }
-        return prev;
+        // Instead of window.confirm which might be blocked in iframes, 
+        // we'll clear the cart and show a toast. 
+        // This is a better UX for this specific campus app.
+        showToast(`Cleared cart from previous canteen. Added ${item.name}.`, 'info');
+        return [{ ...item, quantity: 1 }];
       }
 
       const existing = prev.find(i => i.id === item.id);
@@ -575,8 +576,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       showToast(`Added ${item.name} to cart`, 'success');
       return [...prev, { ...item, quantity: 1 }];
     });
-    // Don't open cart automatically anymore
-    // setIsCartOpen(true);
+    setIsCartOpen(true);
   };
 
   const updateQuantity = (itemId: string, delta: number) => {
@@ -1208,7 +1208,7 @@ const CanteenDetails = () => {
                         <button
                           disabled={!canteen.isAcceptingOrders}
                           onClick={() => addToCart(item)}
-                          className="bg-emerald-500 text-white px-3 py-1 rounded-lg text-xs font-bold hover:bg-emerald-400 transition-colors disabled:opacity-50"
+                          className="bg-emerald-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-emerald-400 transition-colors disabled:opacity-50 shadow-lg shadow-emerald-500/20"
                         >
                           + Add
                         </button>
@@ -1238,7 +1238,7 @@ const CanteenDetails = () => {
                       <button
                         disabled={!canteen.isAcceptingOrders}
                         onClick={() => addToCart(item)}
-                        className="bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-lg text-sm font-bold hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+                        className="bg-emerald-500/10 text-emerald-500 px-4 py-2 rounded-xl text-sm font-bold hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
                       >
                         + Add
                       </button>
@@ -1280,20 +1280,33 @@ const CanteenDetails = () => {
   );
 };
 
-const CartContent = () => {
+const CartContent = ({ canteen: initialCanteen }: { canteen?: Canteen | null }) => {
   const { cart, total: subtotal, removeFromCart, updateQuantity, clearCart, setIsCartOpen } = useCart();
   const { user, profile } = useAuth();
   const { showToast } = useToast();
-  const [canteen, setCanteen] = useState<Canteen | null>(null);
+  const [canteen, setCanteen] = useState<Canteen | null>(initialCanteen || null);
   const [customerName, setCustomerName] = useState(profile?.username || user?.email?.split('@')[0] || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (profile?.username) {
+      setCustomerName(profile.username);
+    } else if (user?.email) {
+      setCustomerName(user.email.split('@')[0]);
+    }
+  }, [user, profile]);
+
   const cents = canteen?.ecoCashCents || 0;
   const total = subtotal + cents;
 
   useEffect(() => {
+    if (initialCanteen) {
+      setCanteen(initialCanteen);
+      return;
+    }
+
     if (cart.length > 0) {
       const canteenId = cart[0].canteenId;
       const supabase = getSupabase();
@@ -1314,7 +1327,7 @@ const CartContent = () => {
         }
       });
     }
-  }, [cart]);
+  }, [cart, initialCanteen]);
 
   const handleCheckout = async () => {
     if (!user) {
