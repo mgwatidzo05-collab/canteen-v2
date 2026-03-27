@@ -4,7 +4,7 @@ import { User } from '@supabase/supabase-js';
 import { getSupabase, isSupabaseConfigured } from './supabase';
 import { UserProfile, UserRole, Canteen, MenuItem, Order, CartItem, OrderStatus } from './types';
 import { cn } from './lib/utils';
-import { Loader2, LogOut, LayoutDashboard, Store, ShoppingBag, User as UserIcon, Menu, ArrowLeft, Copy, ExternalLink, Trash2, Plus, X, Star, Mail, Lock, AlertCircle, CheckCircle, LogIn, Download, Share, QrCode } from 'lucide-react';
+import { Loader2, LogOut, LayoutDashboard, Store, ShoppingBag, User as UserIcon, Menu, ArrowLeft, Copy, ExternalLink, Trash2, Plus, X, Star, Mail, Lock, AlertCircle, CheckCircle, LogIn, Download, Share, QrCode, Camera } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -191,7 +191,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .eq('id', uid)
       .single();
 
-    if (!error && data) {
+    if (error || !data) {
+      // If profile doesn't exist, create it
+      if (currentUser) {
+        const phone = currentUser.email?.endsWith('@canteenconnect.com') 
+          ? currentUser.email.split('@')[0] 
+          : '';
+        const email = currentUser.email || '';
+        const username = currentUser.user_metadata?.full_name || email.split('@')[0] || 'User';
+        
+        const { data: newProfile, error: createError } = await supabase
+          .from('profiles')
+          .insert({
+            id: uid,
+            username: username,
+            phone: phone,
+            email: email,
+            role: 'customer',
+            last_seen: new Date().toISOString()
+          })
+          .select()
+          .single();
+
+        if (!createError && newProfile) {
+          setProfile({
+            uid: newProfile.id,
+            username: newProfile.username,
+            role: newProfile.role as UserRole,
+            canteenId: newProfile.canteen_id,
+            phone: newProfile.phone,
+            lastSeen: newProfile.last_seen
+          });
+        }
+      }
+    } else if (data) {
       let phone = data.phone;
       let email = data.email;
       let updates: any = {};
@@ -253,41 +286,72 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
+  const { showToast } = useToast();
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     const supabase = getSupabase();
-    if (!supabase) return;
+    if (!supabase) {
+      alert("Database is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
+      setIsLoading(false);
+      return;
+    }
 
     try {
-      // Use phone number as email for Supabase Auth (simple workaround)
-      const email = `${phone}@canteenconnect.com`;
+      const trimmedPhone = phone.trim();
+      const trimmedPassword = password.trim();
+      const trimmedName = name.trim();
+
+      if (!trimmedPhone) throw new Error("Phone number is required");
+      if (!trimmedPassword) throw new Error("Password is required");
+      if (!isLogin && !trimmedName) throw new Error("Full name is required");
+
+      // Use phone number digits as email for Supabase Auth (simple workaround)
+      const phoneDigits = trimmedPhone.replace(/\D/g, '');
+      if (!phoneDigits) throw new Error("Invalid phone number format");
+      const email = `${phoneDigits}@canteenconnect.com`;
 
       if (isLogin) {
         const { error } = await supabase.auth.signInWithPassword({
           email,
-          password,
+          password: trimmedPassword,
         });
-        if (error) throw error;
+        if (error) {
+          if (error.message === 'Invalid login credentials') {
+            throw new Error("Invalid phone number or password. If you don't have an account, please Sign Up.");
+          }
+          throw error;
+        }
+        showToast("Welcome back!", "success");
       } else {
         const { data, error } = await supabase.auth.signUp({
           email,
-          password,
+          password: trimmedPassword,
+          options: {
+            data: {
+              full_name: trimmedName,
+              phone: trimmedPhone
+            }
+          }
         });
         if (error) throw error;
 
         if (data.user) {
           const { error: profileError } = await supabase
             .from('profiles')
-            .insert({
+            .upsert({
               id: data.user.id,
-              username: name,
-              phone: phone,
+              username: trimmedName,
+              phone: trimmedPhone,
               email: email,
               role: 'customer'
             });
-          if (profileError) throw profileError;
+          if (profileError) {
+            console.error("Profile creation error:", profileError);
+            // Don't throw here, the user is still signed up in Auth
+          }
+          showToast("Account created successfully! Welcome to CanteenConnect.", "success");
         }
       }
       navigate('/');
@@ -305,6 +369,13 @@ const Login = () => {
         animate={{ opacity: 1, y: 0 }}
         className="bg-zinc-900 p-8 rounded-3xl border border-zinc-800 w-full max-w-md shadow-2xl"
       >
+        {!isSupabaseConfigured && (
+          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-3 text-red-500 text-sm">
+            <AlertCircle size={20} />
+            <p>Database not configured. Please check environment variables.</p>
+          </div>
+        )}
+
         <div className="text-center mb-8">
           <div className="w-16 h-16 bg-emerald-500/10 rounded-2xl flex items-center justify-center text-emerald-500 mx-auto mb-4">
             <UserIcon size={32} />
@@ -464,7 +535,9 @@ const Navbar = () => {
                     <div className="w-8 h-8 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400">
                       <UserIcon size={16} />
                     </div>
-                    <span className="text-sm font-medium text-zinc-300">{profile?.username || user?.email?.split('@')[0] || 'User'}</span>
+                    <span className="text-sm font-medium text-zinc-300">
+                      {profile?.username || user?.user_metadata?.full_name || 'User'}
+                    </span>
                   </div>
                   <button
                     onClick={logout}
@@ -508,7 +581,9 @@ const Navbar = () => {
                 <div className="w-8 h-8 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400">
                   <UserIcon size={16} />
                 </div>
-                <span className="text-sm font-medium text-zinc-300">{profile?.username || user?.email?.split('@')[0] || 'User'}</span>
+                <span className="text-sm font-medium text-zinc-300">
+                  {profile?.username || user?.user_metadata?.full_name || 'User'}
+                </span>
               </div>
             )}
             <Link to="/admin" onClick={() => setIsMenuOpen(false)} className="text-zinc-100 hover:text-emerald-500 transition-colors">Admin Portal</Link>
@@ -558,24 +633,20 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const { showToast } = useToast();
 
   const addToCart = (item: MenuItem) => {
-    setCart(prev => {
-      // Enforce single canteen cart
-      if (prev.length > 0 && prev[0].canteenId !== item.canteenId) {
-        // Instead of window.confirm which might be blocked in iframes, 
-        // we'll clear the cart and show a toast. 
-        // This is a better UX for this specific campus app.
-        showToast(`Cleared cart from previous canteen. Added ${item.name}.`, 'info');
-        return [{ ...item, quantity: 1 }];
-      }
-
-      const existing = prev.find(i => i.id === item.id);
+    // Enforce single canteen cart
+    if (cart.length > 0 && cart[0].canteenId !== item.canteenId) {
+      setCart([{ ...item, quantity: 1 }]);
+      showToast(`Cleared cart from previous canteen. Added ${item.name}.`, 'info');
+    } else {
+      const existing = cart.find(i => i.id === item.id);
       if (existing) {
+        setCart(prev => prev.map(i => i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i));
         showToast(`Increased ${item.name} quantity`, 'success');
-        return prev.map(i => i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i);
+      } else {
+        setCart(prev => [...prev, { ...item, quantity: 1 }]);
+        showToast(`Added ${item.name} to cart`, 'success');
       }
-      showToast(`Added ${item.name} to cart`, 'success');
-      return [...prev, { ...item, quantity: 1 }];
-    });
+    }
     setIsCartOpen(true);
   };
 
@@ -847,6 +918,12 @@ const MainLayout = ({ children }: { children: React.ReactNode }) => {
     <div className="min-h-screen bg-zinc-950">
       <Navbar />
       <GlobalOrderListener />
+      {!isSupabaseConfigured && (
+        <div className="bg-red-500/10 border-b border-red-500/20 py-2 px-4 text-center text-red-500 text-xs font-medium flex items-center justify-center gap-2">
+          <AlertCircle size={14} />
+          Database not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in environment variables.
+        </div>
+      )}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {children}
       </main>
@@ -1755,6 +1832,7 @@ const PaymentForm = ({ order, onPaid }: { order: Order; onPaid: () => void }) =>
   const [senderName, setSenderName] = useState(order.customerName || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [canteen, setCanteen] = useState<Canteen | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -1769,6 +1847,23 @@ const PaymentForm = ({ order, onPaid }: { order: Order; onPaid: () => void }) =>
       } as any);
     });
   }, [order.canteenId]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) { // 2MB limit for base64
+        showToast("Image is too large. Please use a smaller screenshot (max 2MB).", "error");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result as string;
+        setPaymentProof(base64);
+        setPreviewUrl(base64);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleSubmit = async () => {
     if (!paymentProof.trim()) return;
@@ -1850,15 +1945,50 @@ const PaymentForm = ({ order, onPaid }: { order: Order; onPaid: () => void }) =>
 
         <div className="space-y-1.5">
           <label className="text-[10px] font-bold text-zinc-500 uppercase ml-1">
-            {paymentType === 'code' ? 'EcoCash Code' : 'Payment Proof'}
+            {paymentType === 'code' ? 'EcoCash Code' : 'Payment Proof Screenshot'}
           </label>
-          <input
-            type="text"
-            value={paymentProof}
-            onChange={(e) => setPaymentProof(e.target.value)}
-            placeholder={paymentType === 'code' ? "Enter EcoCash Code" : "Enter payment details"}
-            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-100 outline-none focus:border-emerald-500 transition-all"
-          />
+          {paymentType === 'code' ? (
+            <input
+              type="text"
+              value={paymentProof}
+              onChange={(e) => setPaymentProof(e.target.value)}
+              placeholder="Enter EcoCash Code"
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-100 outline-none focus:border-emerald-500 transition-all"
+            />
+          ) : (
+            <div className="space-y-3">
+              <div className="relative group">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileChange}
+                  className="hidden"
+                  id="screenshot-upload"
+                />
+                <label
+                  htmlFor="screenshot-upload"
+                  className="flex flex-col items-center justify-center w-full h-32 bg-zinc-900 border-2 border-dashed border-zinc-800 rounded-xl cursor-pointer hover:border-emerald-500 hover:bg-zinc-800/50 transition-all overflow-hidden"
+                >
+                  {previewUrl ? (
+                    <img src={previewUrl} alt="Preview" className="w-full h-full object-contain" />
+                  ) : (
+                    <div className="flex flex-col items-center text-zinc-500">
+                      <Camera size={24} className="mb-2" />
+                      <span className="text-[10px] font-bold uppercase">Click to upload screenshot</span>
+                    </div>
+                  )}
+                </label>
+              </div>
+              {previewUrl && (
+                <button 
+                  onClick={() => { setPreviewUrl(null); setPaymentProof(''); }}
+                  className="text-[10px] font-bold text-red-500 uppercase hover:text-red-400"
+                >
+                  Remove Screenshot
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -2037,7 +2167,19 @@ const MyOrders = () => {
                   {order.status === 'pending' ? (
                     <p className="text-xs text-zinc-500 italic">Visible after acceptance</p>
                   ) : order.paymentProof ? (
-                    <p className="text-xs text-zinc-300 capitalize">{order.paymentType} • {order.paymentProof.slice(0, 8)}...</p>
+                    <div className="flex flex-col items-end gap-1">
+                      <p className="text-[10px] font-bold text-zinc-400 uppercase">{order.paymentType}</p>
+                      {order.paymentType === 'screenshot' ? (
+                        <button 
+                          onClick={() => window.open(order.paymentProof, '_blank')}
+                          className="text-[10px] font-bold text-emerald-500 hover:text-emerald-400 underline uppercase"
+                        >
+                          View Screenshot
+                        </button>
+                      ) : (
+                        <p className="text-xs text-zinc-300 font-mono">{order.paymentProof}</p>
+                      )}
+                    </div>
                   ) : (
                     <p className="text-xs text-amber-500 font-bold">Awaiting Payment</p>
                   )}
@@ -2289,6 +2431,7 @@ const ShareApp = () => {
 };
 
 const AdminPortal = () => {
+  const { showToast } = useToast();
   const [canteens, setCanteens] = useState<Canteen[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [newCanteenName, setNewCanteenName] = useState('');
@@ -2339,6 +2482,7 @@ const AdminPortal = () => {
       const { data, error } = await supabase.from('profiles').select('*');
       if (error) throw error;
       if (data) {
+        console.log(`AdminPortal: Fetched ${data.length} profiles from database.`);
         setUsers(data.map(d => {
           let phone = d.phone;
           // Try to recover phone from email if missing
@@ -2348,7 +2492,7 @@ const AdminPortal = () => {
           
           return {
             uid: d.id,
-            username: d.username,
+            username: d.username || 'No Name',
             role: d.role,
             canteenId: d.canteen_id,
             phone: phone,
@@ -2837,52 +2981,104 @@ const AdminPortal = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800">
-                    {users
-                      .filter(u => 
+                    {users.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-12 text-center">
+                          <div className="flex flex-col items-center gap-2 text-zinc-500">
+                            <UserIcon size={40} className="opacity-20" />
+                            <p>No registered users found in the database.</p>
+                            <p className="text-xs">Users only appear here after their first login or successful sign-up.</p>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : users.filter(u => 
                         u.username.toLowerCase().includes(userSearch.toLowerCase()) || 
                         (u.phone && u.phone.includes(userSearch))
-                      )
-                      .map(u => {
-                      const isOnline = u.lastSeen && (now.getTime() - new Date(u.lastSeen).getTime()) < 120000; // 2 minutes
-                      return (
-                        <tr key={u.uid}>
-                          <td className="py-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400 border border-zinc-700">
-                                <UserIcon size={14} />
+                      ).length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-12 text-center">
+                          <p className="text-zinc-500">No users match your search "{userSearch}"</p>
+                        </td>
+                      </tr>
+                    ) : (
+                      users
+                        .filter(u => 
+                          u.username.toLowerCase().includes(userSearch.toLowerCase()) || 
+                          (u.phone && u.phone.includes(userSearch))
+                        )
+                        .map(u => {
+                        const isOnline = u.lastSeen && (now.getTime() - new Date(u.lastSeen).getTime()) < 120000; // 2 minutes
+                        return (
+                          <tr key={u.uid}>
+                            <td className="py-4">
+                              <div className="flex items-center gap-3">
+                                <div className="relative">
+                                  <div className="w-8 h-8 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400 border border-zinc-700">
+                                    <UserIcon size={14} />
+                                  </div>
+                                  {isOnline && (
+                                    <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 border-2 border-zinc-900 rounded-full" />
+                                  )}
+                                </div>
+                                <span className="font-medium text-zinc-100">{u.username}</span>
                               </div>
-                              <span className="font-medium text-zinc-100">{u.username}</span>
-                            </div>
-                          </td>
-                          <td className="py-4 text-sm text-zinc-400">{u.phone || 'N/A'}</td>
-                          <td className="py-4">
-                            <span className="text-xs px-2 py-1 bg-zinc-800 text-zinc-400 rounded-lg border border-zinc-700 capitalize">
-                              {u.role}
-                            </span>
-                          </td>
-                          <td className="py-4">
-                            <div className="flex items-center gap-2">
-                              <div className={cn(
-                                "w-2 h-2 rounded-full",
-                                isOnline ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-zinc-600"
-                              )} />
-                              <span className={cn(
-                                "text-xs font-medium",
-                                isOnline ? "text-emerald-500" : "text-zinc-500"
-                              )}>
-                                {isOnline ? 'Online' : 'Offline'}
+                            </td>
+                            <td className="py-4 text-sm text-zinc-400">{u.phone || 'N/A'}</td>
+                            <td className="py-4">
+                              <span className="text-xs px-2 py-1 bg-zinc-800 text-zinc-400 rounded-lg border border-zinc-700 capitalize">
+                                {u.role}
                               </span>
-                            </div>
-                          </td>
-                          <td className="py-4 text-xs text-zinc-500">
-                            {u.lastSeen ? new Date(u.lastSeen).toLocaleString() : 'Never'}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                            </td>
+                            <td className="py-4">
+                              <div className="flex items-center gap-2">
+                                <div className={cn(
+                                  "w-2 h-2 rounded-full",
+                                  isOnline ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-zinc-600"
+                                )} />
+                                <span className={cn(
+                                  "text-xs font-medium",
+                                  isOnline ? "text-emerald-500" : "text-zinc-500"
+                                )}>
+                                  {isOnline ? 'Online' : 'Offline'}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="py-4 text-xs text-zinc-500">
+                              {u.lastSeen ? new Date(u.lastSeen).toLocaleString() : 'Never'}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
+
+              {users.length > 0 && users.length < 10 && (
+                <div className="mt-6 p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl">
+                  <div className="flex gap-3">
+                    <AlertCircle className="text-amber-500 shrink-0" size={20} />
+                    <div>
+                      <h4 className="text-sm font-bold text-amber-500">Missing Users?</h4>
+                      <p className="text-xs text-amber-200/70 mt-1 leading-relaxed">
+                        If you expect more users but only see {users.length}, it's likely because:
+                        <br />• They haven't logged in since the profile system was updated.
+                        <br />• Database security (RLS) is preventing you from seeing all records.
+                      </p>
+                      <button 
+                        onClick={() => {
+                          const sql = `ALTER TABLE profiles DISABLE ROW LEVEL SECURITY;`;
+                          navigator.clipboard.writeText(sql);
+                          showToast("SQL command copied to clipboard!", "success");
+                        }}
+                        className="mt-3 text-[10px] font-bold bg-amber-500 text-zinc-900 px-3 py-1 rounded-lg hover:bg-amber-400 transition-colors"
+                      >
+                        Copy Fix SQL Command
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <SupabaseStatus />
@@ -3268,9 +3464,21 @@ const OwnerPortal = () => {
                     {order.paymentProof && (
                       <div className="pt-2">
                         <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1">Payment Proof ({order.paymentType})</p>
-                        <p className="text-xs text-zinc-400 font-mono bg-zinc-900/50 p-2 rounded-lg border border-zinc-800 truncate">
-                          {order.paymentProof}
-                        </p>
+                        {order.paymentType === 'screenshot' ? (
+                          <div className="mt-1">
+                            <img 
+                              src={order.paymentProof} 
+                              alt="Payment Proof" 
+                              className="w-full max-h-48 object-contain rounded-lg border border-zinc-800 bg-zinc-900/50 cursor-pointer hover:opacity-90 transition-all"
+                              onClick={() => window.open(order.paymentProof, '_blank')}
+                            />
+                            <p className="text-[8px] text-zinc-500 mt-1 text-center italic">Click to view full size</p>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-zinc-400 font-mono bg-zinc-900/50 p-2 rounded-lg border border-zinc-800 truncate">
+                            {order.paymentProof}
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
