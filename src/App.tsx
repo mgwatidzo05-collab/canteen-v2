@@ -4,7 +4,7 @@ import { User } from '@supabase/supabase-js';
 import { getSupabase, isSupabaseConfigured } from './supabase';
 import { UserProfile, UserRole, Canteen, MenuItem, Order, CartItem, OrderStatus } from './types';
 import { cn } from './lib/utils';
-import { Loader2, LogOut, LayoutDashboard, Store, ShoppingBag, User as UserIcon, Menu, ArrowLeft, Copy, ExternalLink, Trash2, Plus, X, Star, Mail, Lock, AlertCircle, CheckCircle, LogIn, Download, Share, QrCode, Camera } from 'lucide-react';
+import { Loader2, LogOut, LayoutDashboard, Store, ShoppingBag, User as UserIcon, Menu, ArrowLeft, Copy, ExternalLink, Trash2, Plus, X, Star, Mail, Lock, AlertCircle, CheckCircle, LogIn, Download, Share, QrCode, Camera, FileText } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -279,17 +279,153 @@ export const useAuth = () => {
   return context;
 };
 
+const TermsModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        className="bg-zinc-900 border border-zinc-800 w-full max-w-2xl max-h-[80vh] rounded-3xl overflow-hidden flex flex-col shadow-2xl"
+      >
+        <div className="p-6 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50 backdrop-blur-md sticky top-0 z-10">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-emerald-500/10 rounded-xl flex items-center justify-center text-emerald-500">
+              <FileText size={20} />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-zinc-100">Terms & Conditions</h2>
+              <p className="text-xs text-zinc-500">Last updated: March 2026</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-zinc-800 rounded-xl transition-colors text-zinc-400"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="p-8 overflow-y-auto text-sm text-zinc-400 leading-relaxed space-y-6 custom-scrollbar">
+          <section>
+            <h3 className="text-zinc-100 font-bold mb-2">1. Introduction</h3>
+            <p>By accessing or using the Canteen Connect application, you agree to be bound by these Terms and Conditions.</p>
+          </section>
+
+          <section>
+            <h3 className="text-zinc-100 font-bold mb-2">2. Nature of Service</h3>
+            <p>Canteen Connect operates as a digital platform connecting customers with independent canteens for meal ordering and physical collection (pickup). The platform does not prepare, handle, or deliver food.</p>
+          </section>
+
+          <section>
+            <h3 className="text-zinc-100 font-bold mb-2">3. User Responsibilities</h3>
+            <p>Users agree to provide accurate information, place genuine orders, collect their meals from the selected canteen, and refrain from fraudulent or abusive behavior.</p>
+          </section>
+
+          <section>
+            <h3 className="text-zinc-100 font-bold mb-2">4. Canteen Responsibilities</h3>
+            <p>Canteens are solely responsible for food preparation, quality, pricing, and ensuring that orders are ready for customer pickup.</p>
+          </section>
+
+          <section>
+            <h3 className="text-zinc-100 font-bold mb-2">5. No Delivery Service</h3>
+            <p>Canteen Connect does not offer delivery services. All orders must be collected by the customer at the canteen location.</p>
+          </section>
+
+          <section>
+            <h3 className="text-zinc-100 font-bold mb-2">6. No Liability for Disputes</h3>
+            <p>Canteen Connect is not responsible for disputes between customers and canteens. All disputes must be resolved directly between the parties involved.</p>
+          </section>
+
+          <section>
+            <h3 className="text-zinc-100 font-bold mb-2">7. Payments</h3>
+            <p>All payments are conducted between the customer and the canteen unless otherwise specified.</p>
+          </section>
+
+          <section>
+            <h3 className="text-zinc-100 font-bold mb-2">8. Limitation of Liability</h3>
+            <p>Canteen Connect shall not be liable for food quality issues, delays in preparation, failure to collect orders, or any losses arising from transactions conducted via the platform.</p>
+          </section>
+
+          <section>
+            <h3 className="text-zinc-100 font-bold mb-2">9. Account Suspension</h3>
+            <p>Canteen Connect reserves the right to suspend or terminate accounts involved in fraudulent, abusive, or unlawful activities.</p>
+          </section>
+
+          <section>
+            <h3 className="text-zinc-100 font-bold mb-2">10. Data Protection</h3>
+            <p>User data is collected and processed in accordance with Zimbabwe’s Cyber and Data Protection Act [Chapter 12:07].</p>
+          </section>
+
+          <section>
+            <h3 className="text-zinc-100 font-bold mb-2">11. Changes to Terms</h3>
+            <p>Canteen Connect reserves the right to update these Terms and Conditions at any time without prior notice.</p>
+          </section>
+
+          <div className="pt-4 border-t border-zinc-800">
+            <h2 className="text-lg font-bold text-zinc-100 mb-4">Privacy Policy</h2>
+            
+            <section className="mb-4">
+              <h3 className="text-zinc-100 font-bold mb-2">1. Information We Collect</h3>
+              <p>We may collect personal information including name, phone number, and location data.</p>
+            </section>
+
+            <section className="mb-4">
+              <h3 className="text-zinc-100 font-bold mb-2">2. Use of Information</h3>
+              <p>Collected data is used to connect customers with canteens and facilitate order pickup.</p>
+            </section>
+
+            <section className="mb-4">
+              <h3 className="text-zinc-100 font-bold mb-2">3. Data Sharing</h3>
+              <p>We do not sell user data. Information may only be shared as necessary to provide the service.</p>
+            </section>
+
+            <section className="mb-4">
+              <h3 className="text-zinc-100 font-bold mb-2">4. Data Security</h3>
+              <p>We implement reasonable security measures to protect user data in compliance with applicable laws.</p>
+            </section>
+
+            <section>
+              <h3 className="text-zinc-100 font-bold mb-2">5. User Consent</h3>
+              <p>By using the application, users consent to the collection and use of their data as outlined in this policy.</p>
+            </section>
+          </div>
+        </div>
+
+        <div className="p-6 border-t border-zinc-800 bg-zinc-900/50">
+          <button
+            onClick={onClose}
+            className="w-full bg-emerald-600 text-white py-3 rounded-2xl font-semibold hover:bg-emerald-500 transition-all"
+          >
+            I Understand
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
 const Login = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
   const navigate = useNavigate();
   const { showToast } = useToast();
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!isLogin && !acceptedTerms) {
+      showToast("Please accept the Terms & Conditions to continue", "error");
+      return;
+    }
+
     setIsLoading(true);
     const supabase = getSupabase();
     if (!supabase) {
@@ -423,6 +559,33 @@ const Login = () => {
             />
           </div>
 
+          {!isLogin && (
+            <div className="flex items-start gap-3 py-2">
+              <input
+                type="checkbox"
+                id="terms"
+                checked={acceptedTerms}
+                onChange={(e) => setAcceptedTerms(e.target.checked)}
+                className="mt-1 w-4 h-4 rounded border-zinc-700 bg-zinc-800 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-zinc-900"
+              />
+              <label htmlFor="terms" className="text-xs text-zinc-400 leading-relaxed">
+                I accept the <button type="button" onClick={() => setShowTerms(true)} className="text-emerald-500 hover:underline">Terms & Conditions</button> and Privacy Policy
+              </label>
+            </div>
+          )}
+
+          {isLogin && (
+            <div className="text-right">
+              <button 
+                type="button" 
+                onClick={() => setShowTerms(true)}
+                className="text-xs text-zinc-500 hover:text-emerald-500 transition-colors"
+              >
+                View Terms & Conditions
+              </button>
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={isLoading}
@@ -431,6 +594,8 @@ const Login = () => {
             {isLoading ? <Loader2 className="animate-spin" size={20} /> : (isLogin ? 'Sign In' : 'Sign Up')}
           </button>
         </form>
+
+        <TermsModal isOpen={showTerms} onClose={() => setShowTerms(false)} />
 
         <div className="mt-6 text-center space-y-4">
           <button
