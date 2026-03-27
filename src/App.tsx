@@ -407,6 +407,48 @@ const TermsModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void 
   );
 };
 
+const ImagePreviewModal = ({ imageUrl, onClose }: { imageUrl: string | null; onClose: () => void }) => {
+  if (!imageUrl) return null;
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.9 }}
+        className="relative max-w-4xl w-full max-h-[90vh] flex flex-col items-center"
+      >
+        <button
+          onClick={onClose}
+          className="absolute -top-12 right-0 p-2 text-white hover:bg-white/10 rounded-full transition-all"
+        >
+          <X size={24} />
+        </button>
+        <img 
+          src={imageUrl} 
+          alt="Preview" 
+          className="max-w-full max-h-[80vh] object-contain rounded-2xl shadow-2xl border border-white/10"
+        />
+        <div className="mt-4 flex gap-4">
+          <a 
+            href={imageUrl} 
+            download="payment-proof.png"
+            className="bg-emerald-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-emerald-500 transition-all flex items-center gap-2"
+          >
+            <Download size={18} /> Download
+          </a>
+          <button 
+            onClick={onClose}
+            className="bg-zinc-800 text-white px-6 py-2 rounded-xl font-bold hover:bg-zinc-700 transition-all"
+          >
+            Close
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
 const Login = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [name, setName] = useState('');
@@ -2172,12 +2214,15 @@ const MyOrders = () => {
   const { user, profile, loading: authLoading } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   useEffect(() => {
     const supabase = getSupabase();
     if (!supabase) return;
 
-    const fetchOrders = async () => {
+    const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  const fetchOrders = async () => {
       if (authLoading) return;
 
       const supabase = getSupabase();
@@ -2336,7 +2381,7 @@ const MyOrders = () => {
                       <p className="text-[10px] font-bold text-zinc-400 uppercase">{order.paymentType}</p>
                       {order.paymentType === 'screenshot' ? (
                         <button 
-                          onClick={() => window.open(order.paymentProof, '_blank')}
+                          onClick={() => setPreviewImage(order.paymentProof)}
                           className="text-[10px] font-bold text-emerald-500 hover:text-emerald-400 underline uppercase"
                         >
                           View Screenshot
@@ -2418,6 +2463,10 @@ const MyOrders = () => {
           </div>
         )}
       </div>
+      <ImagePreviewModal 
+        imageUrl={previewImage} 
+        onClose={() => setPreviewImage(null)} 
+      />
     </div>
   );
 };
@@ -2609,6 +2658,7 @@ const AdminPortal = () => {
   const [activeTab, setActiveTab] = useState<'canteens' | 'users' | 'supabase'>('canteens');
   const [userSearch, setUserSearch] = useState('');
   const [now, setNow] = useState(new Date());
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   const fetchCanteens = useCallback(async () => {
     const supabase = getSupabase();
@@ -3254,6 +3304,7 @@ const AdminPortal = () => {
   );
 };
 const OwnerPortal = () => {
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [canteen, setCanteen] = useState<Canteen | null>(null);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -3635,7 +3686,7 @@ const OwnerPortal = () => {
                               src={order.paymentProof} 
                               alt="Payment Proof" 
                               className="w-full max-h-48 object-contain rounded-lg border border-zinc-800 bg-zinc-900/50 cursor-pointer hover:opacity-90 transition-all"
-                              onClick={() => window.open(order.paymentProof, '_blank')}
+                              onClick={() => setPreviewImage(order.paymentProof)}
                             />
                             <p className="text-[8px] text-zinc-500 mt-1 text-center italic">Click to view full size</p>
                           </div>
@@ -3908,6 +3959,10 @@ const OwnerPortal = () => {
           </section>
         </div>
       </div>
+      <ImagePreviewModal 
+        imageUrl={previewImage} 
+        onClose={() => setPreviewImage(null)} 
+      />
     </div>
   );
 };
