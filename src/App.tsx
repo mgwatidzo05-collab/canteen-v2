@@ -127,7 +127,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     supabase.auth.getSession().then(({ data: { session }, error }) => {
       if (error) {
         console.warn('Auth session error:', error.message);
-        supabase.auth.signOut();
+        // If the refresh token is invalid, we should sign out to clear the session
+        const isTokenError = 
+          error.message.includes('refresh_token_not_found') || 
+          error.message.includes('Refresh Token Not Found') ||
+          error.message.includes('invalid_refresh_token') ||
+          error.message.includes('Invalid Refresh Token') ||
+          error.message.includes('JWT expired');
+
+        if (isTokenError) {
+          supabase.auth.signOut().finally(() => {
+            setUser(null);
+            setProfile(null);
+            setLoading(false);
+          });
+          return;
+        }
         setLoading(false);
         return;
       }
@@ -181,6 +196,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => clearInterval(interval);
   }, [user]);
 
+  const handleAuthError = useCallback(async (error: any) => {
+    if (!error) return;
+    const msg = error.message || String(error);
+    const isTokenError = 
+      msg.includes('refresh_token_not_found') || 
+      msg.includes('Refresh Token Not Found') ||
+      msg.includes('invalid_refresh_token') ||
+      msg.includes('Invalid Refresh Token') ||
+      msg.includes('JWT expired');
+
+    if (isTokenError) {
+      console.warn('Handling auth error, signing out...', msg);
+      const supabase = getSupabase();
+      if (supabase) {
+        await supabase.auth.signOut().finally(() => {
+          setUser(null);
+          setProfile(null);
+          setLoading(false);
+        });
+      }
+    }
+  }, []);
+
   const fetchProfile = async (uid: string, currentUser?: User | null) => {
     const supabase = getSupabase();
     if (!supabase) return;
@@ -191,37 +229,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .eq('id', uid)
       .single();
 
-    if (error || !data) {
-      // If profile doesn't exist, create it
-      if (currentUser) {
-        const phone = currentUser.email?.endsWith('@canteenconnect.com') 
-          ? currentUser.email.split('@')[0] 
-          : '';
-        const email = currentUser.email || '';
-        const username = currentUser.user_metadata?.full_name || email.split('@')[0] || 'User';
-        
-        const { data: newProfile, error: createError } = await supabase
-          .from('profiles')
-          .insert({
-            id: uid,
-            username: username,
-            phone: phone,
-            email: email,
-            role: 'customer',
-            last_seen: new Date().toISOString()
-          })
-          .select()
-          .single();
+    if (error) {
+      handleAuthError(error);
+      if (!data) {
+        // If profile doesn't exist, create it
+        if (currentUser) {
+          const phone = currentUser.email?.endsWith('@canteenconnect.com') 
+            ? currentUser.email.split('@')[0] 
+            : '';
+          const email = currentUser.email || '';
+          const username = currentUser.user_metadata?.full_name || email.split('@')[0] || 'User';
+          
+          const { data: newProfile, error: createError } = await supabase
+            .from('profiles')
+            .insert({
+              id: uid,
+              username: username,
+              phone: phone,
+              email: email,
+              role: 'customer',
+              last_seen: new Date().toISOString()
+            })
+            .select()
+            .single();
 
-        if (!createError && newProfile) {
-          setProfile({
-            uid: newProfile.id,
-            username: newProfile.username,
-            role: newProfile.role as UserRole,
-            canteenId: newProfile.canteen_id,
-            phone: newProfile.phone,
-            lastSeen: newProfile.last_seen
-          });
+          if (!createError && newProfile) {
+            setProfile({
+              uid: newProfile.id,
+              username: newProfile.username,
+              role: newProfile.role as UserRole,
+              canteenId: newProfile.canteen_id,
+              phone: newProfile.phone,
+              lastSeen: newProfile.last_seen
+            });
+          }
         }
       }
     } else if (data) {
@@ -267,7 +308,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, logout }}>
+    <AuthContext.Provider value={{ user, profile, loading, logout, handleAuthError }}>
       {children}
     </AuthContext.Provider>
   );
@@ -1199,7 +1240,7 @@ export default function App() {
 const ExploreCanteens = () => {
   const [canteens, setCanteens] = useState<Canteen[]>([]);
   const [loading, setLoading] = useState(true);
-  const { user, profile, loading: authLoading } = useAuth();
+  const { user, profile, loading: authLoading, handleAuthError } = useAuth();
 
   useEffect(() => {
     const supabase = getSupabase();
@@ -1214,6 +1255,7 @@ const ExploreCanteens = () => {
 
       if (error) {
         console.error('Error fetching canteens:', error);
+        handleAuthError(error);
         return;
       }
 
@@ -1375,6 +1417,7 @@ const CanteenDetails = () => {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
   const { addToCart } = useCart();
+  const { handleAuthError } = useAuth();
 
   useEffect(() => {
     const supabase = getSupabase();
@@ -1426,6 +1469,7 @@ const CanteenDetails = () => {
         }
       } catch (err) {
         console.error('Error fetching canteen data:', err);
+        handleAuthError(err);
       } finally {
         setLoading(false);
       }
@@ -1566,7 +1610,7 @@ const CanteenDetails = () => {
 
 const CartContent = ({ canteen: initialCanteen }: { canteen?: Canteen | null }) => {
   const { cart, total: subtotal, removeFromCart, updateQuantity, clearCart, setIsCartOpen } = useCart();
-  const { user, profile } = useAuth();
+  const { user, profile, handleAuthError } = useAuth();
   const { showToast } = useToast();
   const [canteen, setCanteen] = useState<Canteen | null>(initialCanteen || null);
   const [customerName, setCustomerName] = useState(profile?.username || user?.email?.split('@')[0] || '');
@@ -1658,6 +1702,7 @@ const CartContent = ({ canteen: initialCanteen }: { canteen?: Canteen | null }) 
       setOrderSuccess(orderId);
     } catch (err: any) {
       console.error("Checkout Error:", err);
+      handleAuthError(err);
       setError(err.message || "Failed to place order.");
     } finally {
       setIsSubmitting(false);
@@ -1850,7 +1895,7 @@ const CartDrawer = ({ onClose }: { onClose: () => void }) => {
 };
 
 const ReviewModal = ({ order, onClose }: { order: Order; onClose: () => void }) => {
-  const { user, profile } = useAuth();
+  const { user, profile, handleAuthError } = useAuth();
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1901,6 +1946,7 @@ const ReviewModal = ({ order, onClose }: { order: Order; onClose: () => void }) 
       }, 2000);
     } catch (err: any) {
       console.error("Error submitting review:", err);
+      handleAuthError(err);
       setError(err.message || "Failed to submit review. Please try again.");
     } finally {
       setIsSubmitting(false);
@@ -2034,6 +2080,7 @@ const ReviewButton = ({ order }: { order: Order }) => {
 };
 
 const PaymentForm = ({ order, onPaid }: { order: Order; onPaid: () => void }) => {
+  const { handleAuthError } = useAuth();
   const [paymentType, setPaymentType] = useState<'code' | 'screenshot'>('code');
   const [paymentProof, setPaymentProof] = useState('');
   const [senderName, setSenderName] = useState(order.customerName || '');
@@ -2090,6 +2137,7 @@ const PaymentForm = ({ order, onPaid }: { order: Order; onPaid: () => void }) =>
       showToast("Payment submitted! Canteen will verify.", "success");
       onPaid();
     } catch (err: any) {
+      handleAuthError(err);
       showToast(err.message, "error");
     } finally {
       setIsSubmitting(false);
@@ -2211,7 +2259,7 @@ const PaymentForm = ({ order, onPaid }: { order: Order; onPaid: () => void }) =>
 };
 
 const MyOrders = () => {
-  const { user, profile, loading: authLoading } = useAuth();
+  const { user, profile, loading: authLoading, handleAuthError } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -2219,8 +2267,6 @@ const MyOrders = () => {
   useEffect(() => {
     const supabase = getSupabase();
     if (!supabase) return;
-
-    const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   const fetchOrders = async () => {
       if (authLoading) return;
@@ -2266,6 +2312,7 @@ const MyOrders = () => {
 
       if (error) {
         console.error("Error fetching orders:", error);
+        handleAuthError(error);
       }
 
       if (!error && data) {
@@ -2645,6 +2692,7 @@ const ShareApp = () => {
 };
 
 const AdminPortal = () => {
+  const { handleAuthError } = useAuth();
   const { showToast } = useToast();
   const [canteens, setCanteens] = useState<Canteen[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -2687,8 +2735,9 @@ const AdminPortal = () => {
       }
     } catch (err) {
       console.error('Error fetching canteens in admin:', err);
+      handleAuthError(err);
     }
-  }, []);
+  }, [handleAuthError]);
 
   const fetchUsers = useCallback(async () => {
     const supabase = getSupabase();
@@ -2717,8 +2766,9 @@ const AdminPortal = () => {
       }
     } catch (err) {
       console.error('Error fetching users in admin:', err);
+      handleAuthError(err);
     }
-  }, []);
+  }, [handleAuthError]);
 
   useEffect(() => {
     if (!isAdminAuthenticated) return;
@@ -3304,6 +3354,7 @@ const AdminPortal = () => {
   );
 };
 const OwnerPortal = () => {
+  const { handleAuthError } = useAuth();
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [canteen, setCanteen] = useState<Canteen | null>(null);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
@@ -3365,6 +3416,7 @@ const OwnerPortal = () => {
       } as MenuItem)));
     } else if (menuError) {
       console.error('Error fetching menu items:', menuError);
+      handleAuthError(menuError);
     }
 
     const { data: orderData, error: orderError } = await supabase
