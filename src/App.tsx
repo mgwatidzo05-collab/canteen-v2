@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, Component, useCallback, useRef } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, Link, useParams, useNavigate } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Navigate, Link, useParams, useNavigate } from 'react-router-dom';
 import { User } from '@supabase/supabase-js';
 import { getSupabase, isSupabaseConfigured } from './supabase';
 import { UserProfile, UserRole, Canteen, MenuItem, Order, CartItem, OrderStatus } from './types';
