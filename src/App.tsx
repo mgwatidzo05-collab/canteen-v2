@@ -2730,7 +2730,10 @@ const AdminPortal = () => {
           notice: d.notice,
           isAcceptingOrders: d.is_accepting_orders,
           rating: d.rating,
-          reviewCount: d.review_count
+          reviewCount: d.review_count,
+          dailyRevenue: d.daily_revenue || 0,
+          monthlyRevenue: d.monthly_revenue || 0,
+          totalRevenue: d.total_revenue || 0
         } as Canteen)));
       }
     } catch (err) {
@@ -2825,7 +2828,10 @@ const AdminPortal = () => {
         is_accepting_orders: true,
         rating: 0,
         review_count: 0,
-        ecocash_rate: 1
+        ecocash_rate: 1,
+        daily_revenue: 0,
+        monthly_revenue: 0,
+        total_revenue: 0
       });
 
       if (error) throw error;
@@ -3018,6 +3024,27 @@ const AdminPortal = () => {
         </div>
 
         <div className="lg:col-span-2 space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-2">
+            <div className="bg-zinc-900 p-6 rounded-[2rem] border border-zinc-800 shadow-xl">
+              <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-1">Network Daily Revenue</p>
+              <p className="text-3xl font-black text-emerald-500">
+                ${canteens.reduce((acc, c) => acc + (c.dailyRevenue || 0), 0).toFixed(2)}
+              </p>
+            </div>
+            <div className="bg-zinc-900 p-6 rounded-[2rem] border border-zinc-800 shadow-xl">
+              <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-1">Network Monthly Revenue</p>
+              <p className="text-3xl font-black text-blue-500">
+                ${canteens.reduce((acc, c) => acc + (c.monthlyRevenue || 0), 0).toFixed(2)}
+              </p>
+            </div>
+            <div className="bg-zinc-900 p-6 rounded-[2rem] border border-zinc-800 shadow-xl">
+              <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-1">Network Total Revenue</p>
+              <p className="text-3xl font-black text-zinc-100">
+                ${canteens.reduce((acc, c) => acc + (c.totalRevenue || 0), 0).toFixed(2)}
+              </p>
+            </div>
+          </div>
+
           <div className="flex gap-2 mb-2">
             <button
               onClick={() => setActiveTab('canteens')}
@@ -3046,6 +3073,48 @@ const AdminPortal = () => {
             >
               Supabase Link
             </button>
+            
+            <div className="flex-1" />
+            
+            {activeTab === 'canteens' && (
+              <div className="flex gap-2">
+                <button
+                  onClick={async () => {
+                    const supabase = getSupabase();
+                    if (!supabase) return;
+                    if (confirm("Reset ALL daily revenues for ALL canteens?")) {
+                      const { error } = await supabase.from('canteens').update({ daily_revenue: 0 }).neq('id', 'placeholder');
+                      if (!error) {
+                        showToast("All daily revenues reset", "success");
+                        fetchCanteens();
+                      }
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600/10 text-amber-500 border border-amber-500/20 hover:bg-amber-600/20 transition-all"
+                >
+                  Reset All Daily
+                </button>
+                <button
+                  onClick={async () => {
+                    const supabase = getSupabase();
+                    if (!supabase) return;
+                    if (confirm("Sync Monthly revenue from Daily revenue for canteens with 0 monthly revenue?")) {
+                      // We have to do this per canteen or with a complex RPC, but simple loop for now if canteens are few
+                      for (const c of canteens) {
+                        if ((c.monthlyRevenue || 0) === 0 && (c.dailyRevenue || 0) > 0) {
+                          await supabase.from('canteens').update({ monthly_revenue: c.dailyRevenue }).eq('id', c.id);
+                        }
+                      }
+                      showToast("Monthly revenues synced", "success");
+                      fetchCanteens();
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-blue-600/10 text-blue-500 border border-blue-500/20 hover:bg-blue-600/20 transition-all"
+                >
+                  Sync Monthly
+                </button>
+              </div>
+            )}
           </div>
 
           {activeTab === 'canteens' ? (
@@ -3100,6 +3169,9 @@ const AdminPortal = () => {
                       <th className="pb-3 font-medium text-zinc-500">Contact</th>
                       <th className="pb-3 font-medium text-zinc-500">Code</th>
                       <th className="pb-3 font-medium text-zinc-500">Status</th>
+                      <th className="pb-3 font-medium text-zinc-500">Daily Rev</th>
+                      <th className="pb-3 font-medium text-zinc-500">Monthly Rev</th>
+                      <th className="pb-3 font-medium text-zinc-500">Total Rev</th>
                       <th className="pb-3 font-medium text-zinc-500">Actions</th>
                     </tr>
                   </thead>
@@ -3152,6 +3224,15 @@ const AdminPortal = () => {
                             {canteen.status}
                           </span>
                         </td>
+                        <td className="py-4 text-sm font-bold text-emerald-500">
+                          ${canteen.dailyRevenue?.toFixed(2) || '0.00'}
+                        </td>
+                        <td className="py-4 text-sm font-bold text-blue-500">
+                          ${canteen.monthlyRevenue?.toFixed(2) || '0.00'}
+                        </td>
+                        <td className="py-4 text-sm font-bold text-zinc-100">
+                          ${canteen.totalRevenue?.toFixed(2) || '0.00'}
+                        </td>
                         <td className="py-4">
                           <div className="flex items-center gap-2">
                             <button
@@ -3169,6 +3250,34 @@ const AdminPortal = () => {
                             >
                               <ExternalLink size={12} /> View
                             </Link>
+                            <button
+                              onClick={async () => {
+                                const supabase = getSupabase();
+                                if (!supabase) return;
+                                if (confirm(`Reset daily revenue for ${canteen.name}?`)) {
+                                  await supabase.from('canteens').update({ daily_revenue: 0 }).eq('id', canteen.id);
+                                  showToast("Daily revenue reset", "success");
+                                }
+                              }}
+                              className="text-xs font-medium px-3 py-1 rounded-lg border border-amber-500/20 text-amber-400 hover:bg-amber-500/10 transition-colors"
+                              title="Reset Daily Revenue"
+                            >
+                              Reset Daily
+                            </button>
+                            <button
+                              onClick={async () => {
+                                const supabase = getSupabase();
+                                if (!supabase) return;
+                                if (confirm(`Reset monthly revenue for ${canteen.name}?`)) {
+                                  await supabase.from('canteens').update({ monthly_revenue: 0 }).eq('id', canteen.id);
+                                  showToast("Monthly revenue reset", "success");
+                                }
+                              }}
+                              className="text-xs font-medium px-3 py-1 rounded-lg border border-blue-500/20 text-blue-400 hover:bg-blue-500/10 transition-colors"
+                              title="Reset Monthly Revenue"
+                            >
+                              Reset Monthly
+                            </button>
                             <button
                               onClick={() => setDeletingId(canteen.id)}
                               className="p-2 text-zinc-500 hover:text-red-500 transition-colors rounded-lg hover:bg-red-500/10"
@@ -3396,7 +3505,10 @@ const OwnerPortal = () => {
         notice: canteenData.notice,
         isAcceptingOrders: canteenData.is_accepting_orders,
         rating: canteenData.rating,
-        reviewCount: canteenData.review_count
+        reviewCount: canteenData.review_count,
+        dailyRevenue: canteenData.daily_revenue || 0,
+        monthlyRevenue: canteenData.monthly_revenue || 0,
+        totalRevenue: canteenData.total_revenue || 0
       } as Canteen);
     }
 
@@ -3584,6 +3696,39 @@ const OwnerPortal = () => {
         <div className="flex gap-3">
           <div className="flex items-center gap-4 bg-zinc-900 p-3 rounded-2xl border border-zinc-800">
             <div className="flex flex-col text-right">
+              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Daily Revenue</span>
+              <span className="text-sm font-black text-emerald-500">${canteen?.dailyRevenue?.toFixed(2) || '0.00'}</span>
+            </div>
+            <button
+              onClick={async () => {
+                if (!canteen) return;
+                const supabase = getSupabase();
+                if (!supabase) return;
+                if (confirm("Reset daily revenue for today?")) {
+                  const { error } = await supabase.from('canteens').update({ daily_revenue: 0 }).eq('id', canteen.id);
+                  if (!error) showToast("Daily revenue reset", "success");
+                }
+              }}
+              className="p-2 text-zinc-500 hover:text-amber-500 transition-colors"
+              title="Reset Daily Revenue"
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+          <div className="flex items-center gap-4 bg-zinc-900 p-3 rounded-2xl border border-zinc-800">
+            <div className="flex flex-col text-right">
+              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Monthly Revenue</span>
+              <span className="text-sm font-black text-blue-500">${canteen?.monthlyRevenue?.toFixed(2) || '0.00'}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-4 bg-zinc-900 p-3 rounded-2xl border border-zinc-800">
+            <div className="flex flex-col text-right">
+              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Total Revenue</span>
+              <span className="text-sm font-black text-zinc-100">${canteen?.totalRevenue?.toFixed(2) || '0.00'}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-4 bg-zinc-900 p-3 rounded-2xl border border-zinc-800">
+            <div className="flex flex-col text-right">
               <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Store Status</span>
               <span className={cn("text-xs font-bold", canteen?.isAcceptingOrders ? "text-emerald-500" : "text-red-500")}>
                 {canteen?.isAcceptingOrders ? 'Accepting Orders' : 'Closed to Orders'}
@@ -3713,8 +3858,48 @@ const OwnerPortal = () => {
                         onChange={async (e) => {
                           const supabase = getSupabase();
                           if (!supabase) return;
-                          const newStatus = e.target.value;
-                          await supabase.from('orders').update({ status: newStatus }).eq('id', order.id);
+                          const newStatus = e.target.value as OrderStatus;
+                          const oldStatus = order.status;
+                          
+                          // Update order status
+                          const { error: orderError } = await supabase.from('orders').update({ status: newStatus }).eq('id', order.id);
+                          if (orderError) {
+                            showToast("Failed to update order status", "error");
+                            return;
+                          }
+
+                          // Revenue logic
+                          if (canteen) {
+                            let dailyUpdate = 0;
+                            let monthlyUpdate = 0;
+                            let totalUpdate = 0;
+
+                            if (oldStatus !== 'paid' && newStatus === 'paid') {
+                              dailyUpdate = order.total;
+                              monthlyUpdate = order.total;
+                              totalUpdate = order.total;
+                            } else if (oldStatus === 'paid' && newStatus !== 'paid') {
+                              dailyUpdate = -order.total;
+                              monthlyUpdate = -order.total;
+                              totalUpdate = -order.total;
+                            }
+
+                            if (dailyUpdate !== 0 || monthlyUpdate !== 0 || totalUpdate !== 0) {
+                              const { error: canteenError } = await supabase
+                                .from('canteens')
+                                .update({ 
+                                  daily_revenue: (canteen.dailyRevenue || 0) + dailyUpdate,
+                                  monthly_revenue: (canteen.monthlyRevenue || 0) + monthlyUpdate,
+                                  total_revenue: (canteen.totalRevenue || 0) + totalUpdate
+                                })
+                                .eq('id', canteen.id);
+                              
+                              if (canteenError) {
+                                console.error("Error updating revenue:", canteenError);
+                              }
+                            }
+                          }
+
                           showToast(`Order #${order.id.slice(-4)} updated to ${newStatus}`, 'success');
                         }}
                         className="px-3 py-1.5 rounded-xl border border-zinc-700 bg-zinc-900 text-zinc-100 text-xs font-bold outline-none focus:border-emerald-500 transition-colors cursor-pointer"

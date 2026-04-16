@@ -26,6 +26,9 @@ export interface Canteen {
   isAcceptingOrders: boolean;
   rating: number;
   reviewCount: number;
+  dailyRevenue?: number;
+  monthlyRevenue?: number;
+  totalRevenue?: number;
 }
 
 export interface MenuItem {
